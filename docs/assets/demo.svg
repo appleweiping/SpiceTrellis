@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1060" viewBox="0 0 1500 1060" role="img" aria-labelledby="title description">
+  <title id="title">SpiceTrellis real command-line demonstration</title>
+  <desc id="description">A terminal capture of a valid circuit inventory and three diagnostics from the intentionally broken example.</desc>
+  <rect width="1500" height="1060" rx="14" fill="#111827"/>
+  <rect width="1500" height="42" rx="14" fill="#1f2937"/>
+  <circle cx="24" cy="21" r="6" fill="#fb7185"/>
+  <circle cx="46" cy="21" r="6" fill="#fbbf24"/>
+  <circle cx="68" cy="21" r="6" fill="#34d399"/>
+  <text x="750" y="27" text-anchor="middle" fill="#cbd5e1" font-family="Consolas, 'Courier New', monospace" font-size="15">SpiceTrellis — real CLI output</text>
+  <g font-family="Consolas, 'Courier New', monospace" font-size="16" fill="#e2e8f0">
+    <text x="24" y="76" fill="#93c5fd">PS&gt; <tspan fill="#f8fafc">uv run spice-trellis inventory examples\hierarchical_filter\top.sp</tspan></text>
+    <text x="24" y="102">{</text>
+    <text x="24" y="124">  "element_families": {</text>
+    <text x="24" y="146">    "C": 1,</text>
+    <text x="24" y="168">    "R": 2,</text>
+    <text x="24" y="190">    "V": 1,</text>
+    <text x="24" y="212">    "X": 3</text>
+    <text x="24" y="234">  },</text>
+    <text x="24" y="256">  "files": 2,</text>
+    <text x="24" y="278">  "includes": 1,</text>
+    <text x="24" y="300">  "models": [],</text>
+    <text x="24" y="322">  "parameters": [</text>
+    <text x="24" y="344">    "CVAL",</text>
+    <text x="24" y="366">    "drive",</text>
+    <text x="24" y="388">    "RVAL",</text>
+    <text x="24" y="410">    "SCALE"</text>
+    <text x="24" y="432">  ],</text>
+    <text x="24" y="454">  "subcircuits": [</text>
+    <text x="24" y="476">    {</text>
+    <text x="24" y="498">      "elements": 2,</text>
+    <text x="24" y="520">      "name": "passive_stage",</text>
+    <text x="24" y="542">      "pins": [</text>
+    <text x="24" y="564">        "input",</text>
+    <text x="24" y="586">        "output"</text>
+    <text x="24" y="608">      ]</text>
+    <text x="24" y="630">    },</text>
+    <text x="24" y="652">    {</text>
+    <text x="24" y="674">      "elements": 2,</text>
+    <text x="24" y="696">      "name": "two_stage",</text>
+    <text x="24" y="718">      "pins": [</text>
+    <text x="24" y="740">        "input",</text>
+    <text x="24" y="762">        "output"</text>
+    <text x="24" y="784">      ]</text>
+    <text x="24" y="806">    }</text>
+    <text x="24" y="828">  ]</text>
+    <text x="24" y="850">}</text>
+    <text x="24" y="894" fill="#93c5fd">PS&gt; <tspan fill="#f8fafc">uv run spice-trellis lint examples\hierarchical_filter\broken.sp</tspan></text>
+    <text x="24" y="928" fill="#fda4af">examples\hierarchical_filter\broken.sp:1:1: error ST2003: include cycle detected: broken.sp -&gt; cycle_a.sp -&gt; broken.sp</text>
+    <text x="24" y="958" fill="#fda4af">examples\hierarchical_filter\broken.sp:3:1: error ST2101: duplicate parameter 'repeated'</text>
+    <text x="24" y="988" fill="#fda4af">examples\hierarchical_filter\broken.sp:4:1: error ST2207: unknown subcircuit 'absent_cell'</text>
+  </g>
+  <text x="1470" y="1038" text-anchor="end" fill="#64748b" font-family="Consolas, 'Courier New', monospace" font-size="13">captured from examples/hierarchical_filter</text>
+</svg>

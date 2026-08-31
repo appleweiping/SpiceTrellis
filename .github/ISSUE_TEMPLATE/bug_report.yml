@@ -1,0 +1,40 @@
+name: Bug report
+description: Report incorrect parsing, analysis, flattening, or CLI behavior
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include proprietary PDK or model data. Use a minimal synthetic deck.
+  - type: input
+    id: version
+    attributes:
+      label: SpiceTrellis version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Minimal synthetic input
+      render: spice
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior and diagnostics
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Python and operating system
+    validations:
+      required: true

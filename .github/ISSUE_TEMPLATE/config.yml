@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Private security report
+    url: https://github.com/appleweiping/SpiceTrellis/security/advisories/new
+    about: Report path escapes, code execution, data exposure, or denial of service privately.
