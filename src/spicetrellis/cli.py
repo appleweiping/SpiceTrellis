@@ -6,8 +6,18 @@ import argparse
 import sys
 from pathlib import Path
 
-from spicetrellis.api import analyze_file, flatten, format_deck, inventory, parse_text
+from spicetrellis._version import __version__
+from spicetrellis.api import (
+    analyze_file,
+    flatten,
+    format_deck,
+    fuzz_smoke,
+    inventory,
+    parse_text,
+    structural_summary,
+)
 from spicetrellis.emit import format_diagnostics, to_json
+from spicetrellis.semantics import DEFAULT_ANALYSIS_LIMITS
 
 
 def _roots(args: argparse.Namespace) -> tuple[Path, ...]:
@@ -15,7 +25,12 @@ def _roots(args: argparse.Namespace) -> tuple[Path, ...]:
 
 
 def _read(path: Path) -> str:
-    return path.read_text(encoding="utf-8-sig")
+    limit = DEFAULT_ANALYSIS_LIMITS.max_file_bytes
+    with path.open("rb") as source:
+        content = source.read(limit + 1)
+    if len(content) > limit:
+        raise ValueError(f"input exceeds the {limit}-byte limit")
+    return content.decode("utf-8-sig")
 
 
 def _write_or_print(text: str, destination: str | None) -> None:
@@ -77,13 +92,20 @@ def _command_inventory(args: argparse.Namespace) -> int:
     if result.has_errors:
         sys.stderr.write(format_diagnostics(result.diagnostics))
         return 1
-    sys.stdout.write(to_json(inventory(result).as_dict()))
+    value = structural_summary(result) if args.interop else inventory(result).as_dict()
+    sys.stdout.write(to_json(value))
+    return 0
+
+
+def _command_fuzz(args: argparse.Namespace) -> int:
+    stats = fuzz_smoke(_read(Path(args.path)), cases=args.cases, seed=args.seed)
+    sys.stdout.write(to_json(stats.as_dict()))
     return 0
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="spice-trellis")
-    parser.add_argument("--version", action="version", version="spice-trellis 0.1.0")
+    parser.add_argument("--version", action="version", version=f"spice-trellis {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     parse_command = subparsers.add_parser("parse", help="parse one file and emit syntax JSON")
@@ -112,7 +134,15 @@ def _parser() -> argparse.ArgumentParser:
     inventory_command = subparsers.add_parser("inventory", help="summarize circuit contents")
     inventory_command.add_argument("path")
     inventory_command.add_argument("--include-root", action="append", default=[])
+    inventory_command.add_argument(
+        "--interop", action="store_true", help="emit the versioned cross-tool summary"
+    )
     inventory_command.set_defaults(handler=_command_inventory)
+    fuzz = subparsers.add_parser("fuzz-smoke", help="run bounded deterministic parser mutations")
+    fuzz.add_argument("path")
+    fuzz.add_argument("--cases", type=int, default=128)
+    fuzz.add_argument("--seed", type=int, default=0)
+    fuzz.set_defaults(handler=_command_fuzz)
     return parser
 
 
@@ -121,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.handler(args))
-    except (OSError, UnicodeError) as error:
+    except (OSError, UnicodeError, ValueError) as error:
         sys.stderr.write(f"spice-trellis: {error}\n")
         return 2
 

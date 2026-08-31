@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from spicetrellis.api import analyze_file, inventory
+import pytest
+
+from spicetrellis.api import AnalysisLimits, analyze_file, inventory
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -119,3 +121,51 @@ def test_end_in_include_is_terminal_for_expanded_project(tmp_path):
     assert any(item.code == "ST2213" for item in analysis.diagnostics)
     assert analysis.deck is not None
     assert not any(getattr(item, "name", None) == "R2" for item in analysis.deck.top)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"max_file_bytes": True},
+        {"max_total_bytes": 1.5},
+        {"max_files": 0},
+        {"max_include_depth": -1},
+        {"max_expanded_statements": "4"},
+    ],
+)
+def test_analysis_limits_require_positive_integers(values):
+    with pytest.raises(ValueError, match="positive integer"):
+        AnalysisLimits(**values)
+
+
+def test_file_and_total_byte_limits_fail_closed(tmp_path):
+    large = tmp_path / "large.sp"
+    large.write_text("R1 a 0 1k\n.end\n", encoding="utf-8")
+    per_file = analyze_file(large, limits=AnalysisLimits(max_file_bytes=8))
+    assert per_file.deck is None
+    assert {item.code for item in per_file.diagnostics} == {"ST2005"}
+
+    child = tmp_path / "child.sp"
+    child.write_text("R1 a 0 1k\n", encoding="utf-8")
+    top = tmp_path / "top.sp"
+    top.write_text('.include "child.sp"\n.end\n', encoding="utf-8")
+    combined_size = top.stat().st_size + child.stat().st_size
+    total = analyze_file(
+        top,
+        limits=AnalysisLimits(max_file_bytes=100, max_total_bytes=combined_size - 1),
+    )
+    assert "ST2006" in {item.code for item in total.diagnostics}
+
+
+def test_file_depth_and_expansion_limits_fail_closed(tmp_path):
+    (tmp_path / "leaf.sp").write_text("R1 a 0 1k\n", encoding="utf-8")
+    (tmp_path / "middle.sp").write_text('.include "leaf.sp"\n', encoding="utf-8")
+    top = tmp_path / "top.sp"
+    top.write_text('.include "middle.sp"\n.include "leaf.sp"\n.end\n', encoding="utf-8")
+
+    file_limited = analyze_file(top, limits=AnalysisLimits(max_files=2))
+    assert "ST2007" in {item.code for item in file_limited.diagnostics}
+    depth_limited = analyze_file(top, limits=AnalysisLimits(max_include_depth=1))
+    assert "ST2008" in {item.code for item in depth_limited.diagnostics}
+    expansion_limited = analyze_file(top, limits=AnalysisLimits(max_expanded_statements=1))
+    assert "ST2010" in {item.code for item in expansion_limited.diagnostics}

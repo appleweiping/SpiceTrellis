@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If SpiceTrellis supports your work, please cite this software."
+type: software
+title: "SpiceTrellis"
+abstract: "A provenance-preserving front end for hierarchical SPICE decks."
+authors:
+  - family-names: "Yan"
+    given-names: "Weiping"
+repository-code: "https://github.com/appleweiping/SpiceTrellis"
+url: "https://github.com/appleweiping/SpiceTrellis"
+license: MIT
+version: 0.2.0
+date-released: 2026-08-31
+keywords:
+  - SPICE
+  - electronic design automation
+  - netlist

@@ -56,6 +56,7 @@ _SCALES = {
     "p": Decimal("1e-12"),
     "f": Decimal("1e-15"),
 }
+_MAX_EXPONENT_MAGNITUDE = Decimal("10000")
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,8 +204,10 @@ def evaluate_expression(expression: Expr, environment: Mapping[str, Decimal]) ->
             return left / right
         if right != right.to_integral_value():
             raise ExpressionError("SPICE exponent must be an integer in the portable subset")
+        if abs(right) > _MAX_EXPONENT_MAGNITUDE:
+            raise ExpressionError("SPICE exponent magnitude exceeds the portable subset limit")
         return left ** int(right)
-    except (DivisionByZero, InvalidOperation, OverflowError) as error:
+    except (DivisionByZero, InvalidOperation, OverflowError, ValueError) as error:
         raise ExpressionError(f"cannot evaluate expression: {error}") from error
 
 

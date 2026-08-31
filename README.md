@@ -201,14 +201,14 @@ SpiceTrellis reads text and writes explicitly requested artifacts. It does not:
 - load native plugins;
 - follow an include outside configured roots.
 
-Circuit text is untrusted input. Resource limits for hostile multi-gigabyte
-decks are not part of version 0.1, so callers handling public uploads should
-also enforce file-size and process limits. See [SECURITY.md](SECURITY.md) for
-responsible reporting.
+Circuit text is untrusted input. Built-in file, byte, include-depth, statement,
+expression, and elaboration budgets fail closed, but they are not an operating-system
+sandbox. Callers handling public uploads should also enforce process-level CPU and
+memory limits. See [SECURITY.md](SECURITY.md) for responsible reporting.
 
 ## Scope and limitations
 
-Version 0.1 intentionally does not implement:
+Current 0.x releases intentionally do not implement:
 
 - numeric simulation or performance prediction;
 - `.lib` section selection, `.control` execution, behavioral expressions, or
@@ -230,6 +230,13 @@ tables use case-folded keys for lookup and stable sorted order for diagnostics.
 Output order follows source and instance order rather than hash-table order.
 
 See [docs/architecture.md](docs/architecture.md) for data-flow and invariants.
+
+## Validation and interoperability
+
+The clean-room portable analog corpus supports deterministic fuzz and benchmark entry points. See
+[docs/validation.md](docs/validation.md) for provenance and reproduction commands.
+`spice-trellis inventory deck.sp --interop` emits a content-bound structural observation for
+independent consumers; it is not proof of electrical correctness.
 
 ## Contributing
 

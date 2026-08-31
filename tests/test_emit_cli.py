@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from spicetrellis import __version__
 from spicetrellis.cli import main
 from spicetrellis.emit import format_deck, to_json
 from spicetrellis.parser import parse_text
@@ -84,11 +85,19 @@ def test_io_failure_uses_exit_code_two(capsys):
     assert "spice-trellis:" in capsys.readouterr().err
 
 
+def test_direct_file_commands_reject_oversized_input_without_traceback(tmp_path, capsys):
+    path = tmp_path / "oversized.sp"
+    path.write_bytes(b"*" * (2 * 1024 * 1024 + 1))
+    for command in ("parse", "format", "fuzz-smoke"):
+        assert main([command, str(path)]) == 2
+        assert "exceeds the" in capsys.readouterr().err
+
+
 def test_version_and_required_command(capsys):
     with pytest.raises(SystemExit) as version:
         main(["--version"])
     assert version.value.code == 0
-    assert "0.1.0" in capsys.readouterr().out
+    assert __version__ in capsys.readouterr().out
     with pytest.raises(SystemExit) as missing:
         main([])
     assert missing.value.code == 2

@@ -193,6 +193,7 @@ class Analysis:
     deck: SemanticDeck | None
     diagnostics: tuple[Diagnostic, ...]
     dependencies: tuple[Path, ...]
+    source_files: tuple[tuple[Path, bytes], ...] = ()
 
     @property
     def has_errors(self) -> bool:

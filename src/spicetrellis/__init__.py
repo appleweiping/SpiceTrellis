@@ -1,6 +1,27 @@
 """SpiceTrellis public API."""
 
-from spicetrellis.api import analyze_file, flatten, format_deck, inventory, parse_text
+from spicetrellis._version import __version__
+from spicetrellis.api import (
+    AnalysisLimits,
+    ElaborationLimits,
+    analyze_file,
+    flatten,
+    format_deck,
+    fuzz_smoke,
+    inventory,
+    parse_text,
+    structural_summary,
+)
 
-__all__ = ["analyze_file", "flatten", "format_deck", "inventory", "parse_text"]
-__version__ = "0.1.0"
+__all__ = [
+    "AnalysisLimits",
+    "ElaborationLimits",
+    "__version__",
+    "analyze_file",
+    "flatten",
+    "format_deck",
+    "fuzz_smoke",
+    "inventory",
+    "parse_text",
+    "structural_summary",
+]

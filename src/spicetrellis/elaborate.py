@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import re
-from dataclasses import replace
+from collections import defaultdict, deque
+from dataclasses import dataclass, fields, replace
 from decimal import Decimal
 
 from spicetrellis.expressions import (
     ExpressionError,
     Number,
     evaluate_expression,
+    expression_names,
     format_decimal,
     parse_expression,
 )
@@ -36,6 +38,24 @@ from spicetrellis.model import (
 _BRACED_EXPRESSION = re.compile(r"\{([^{}]+)\}")
 
 
+@dataclass(frozen=True, slots=True)
+class ElaborationLimits:
+    """Fail-closed bounds for hierarchical flattening."""
+
+    max_depth: int = 64
+    max_output_statements: int = 10_000
+    max_provenance_records: int = 10_000
+
+    def __post_init__(self) -> None:
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if type(value) is not int or value < 1:
+                raise ValueError(f"{field.name} must be a positive integer")
+
+
+DEFAULT_ELABORATION_LIMITS = ElaborationLimits()
+
+
 def _encode_segment(value: str) -> str:
     """Encode one name segment without ever producing the ``__`` path delimiter."""
 
@@ -58,30 +78,46 @@ def _resolve_assignments(
     span: SourceSpan,
 ) -> dict[str, Decimal]:
     environment = dict(base)
-    pending = list(assignments)
-    while pending:
-        progress = False
-        remaining: list[Assignment] = []
-        for assignment in pending:
-            try:
-                environment[assignment.name.casefold()] = evaluate_expression(
-                    assignment.expression, environment
+    pending = {assignment.name.casefold(): assignment for assignment in assignments}
+    missing: dict[str, set[str]] = {}
+    dependents: defaultdict[str, set[str]] = defaultdict(set)
+    for name, assignment in pending.items():
+        needed = {dependency for dependency in expression_names(assignment.expression)}
+        needed.difference_update(environment)
+        missing[name] = needed
+        for dependency in needed:
+            dependents[dependency].add(name)
+    ready = deque(name for name in pending if not missing[name])
+    while ready:
+        name = ready.popleft()
+        assignment = pending.pop(name)
+        try:
+            environment[name] = evaluate_expression(assignment.expression, environment)
+        except ExpressionError:
+            diagnostics.append(
+                Diagnostic(
+                    "ST3001",
+                    "error",
+                    f"cannot evaluate parameter {assignment.name!r} during elaboration",
+                    span,
                 )
-                progress = True
-            except ExpressionError:
-                remaining.append(assignment)
-        if not progress:
-            for assignment in remaining:
-                diagnostics.append(
-                    Diagnostic(
-                        "ST3001",
-                        "error",
-                        f"cannot evaluate parameter {assignment.name!r} during elaboration",
-                        span,
-                    )
-                )
-            break
-        pending = remaining
+            )
+            continue
+        for dependent in dependents[name]:
+            if dependent not in pending:
+                continue
+            missing[dependent].discard(name)
+            if not missing[dependent]:
+                ready.append(dependent)
+    for assignment in pending.values():
+        diagnostics.append(
+            Diagnostic(
+                "ST3001",
+                "error",
+                f"cannot evaluate parameter {assignment.name!r} during elaboration",
+                span,
+            )
+        )
     return environment
 
 
@@ -130,14 +166,16 @@ def _substitute_tail(
 
 
 class _Elaborator:
-    def __init__(self, deck: SemanticDeck) -> None:
+    def __init__(self, deck: SemanticDeck, limits: ElaborationLimits) -> None:
         self.deck = deck
+        self.limits = limits
         self.subcircuits = deck.subcircuit_map()
         self.global_nodes = {"0", *deck.global_nodes}
         self.diagnostics: list[Diagnostic] = []
         self.output: list[Statement] = []
         self.provenance: list[Provenance] = []
         self.output_names: dict[str, SourceSpan] = {}
+        self.stopped = False
         fallback_span = (
             deck.top[0].meta.span
             if deck.top
@@ -148,6 +186,22 @@ class _Elaborator:
         self.environment = _resolve_assignments(
             deck.global_parameters, {}, self.diagnostics, fallback_span
         )
+
+    def _stop(self, code: str, message: str, span: SourceSpan) -> None:
+        if not self.stopped:
+            self.diagnostics.append(Diagnostic(code, "error", message, span))
+        self.stopped = True
+
+    def _append_passthrough(self, statement: Statement) -> bool:
+        if len(self.output) >= self.limits.max_output_statements:
+            self._stop(
+                "ST3009",
+                f"flattened output exceeds the {self.limits.max_output_statements}-statement limit",
+                statement.meta.span,
+            )
+            return False
+        self.output.append(statement)
+        return True
 
     def _node(self, node: str, mapping: dict[str, str], prefix: str) -> str:
         key = node.casefold()
@@ -171,6 +225,23 @@ class _Elaborator:
         environment: dict[str, Decimal],
         chain: tuple[SourceSpan, ...],
     ) -> None:
+        if self.stopped:
+            return
+        if len(self.output) >= self.limits.max_output_statements:
+            self._stop(
+                "ST3009",
+                f"flattened output exceeds the {self.limits.max_output_statements}-statement limit",
+                element.meta.span,
+            )
+            return
+        if len(self.provenance) >= self.limits.max_provenance_records:
+            self._stop(
+                "ST3010",
+                "flattened provenance exceeds the "
+                f"{self.limits.max_provenance_records}-record limit",
+                element.meta.span,
+            )
+            return
         element_segment = _encode_segment(element.name)
         generated_name = f"{prefix}__{element_segment}" if prefix else element_segment
         name_key = generated_name.casefold()
@@ -233,6 +304,8 @@ class _Elaborator:
         chain: tuple[SourceSpan, ...],
         active: tuple[str, ...],
     ) -> None:
+        if self.stopped:
+            return
         target_name = (instance.model or "").casefold()
         target = self.subcircuits.get(target_name)
         if target is None:
@@ -243,6 +316,13 @@ class _Elaborator:
                     f"cannot expand unknown subcircuit {instance.model!r}",
                     instance.meta.span,
                 )
+            )
+            return
+        if len(chain) >= self.limits.max_depth:
+            self._stop(
+                "ST3011",
+                f"hierarchy exceeds the {self.limits.max_depth}-level elaboration limit",
+                instance.meta.span,
             )
             return
         if target_name in active:
@@ -307,6 +387,8 @@ class _Elaborator:
         )
         next_chain = (*chain, instance.meta.span)
         for statement in target.body:
+            if self.stopped:
+                break
             if isinstance(statement, Param):
                 continue
             elif isinstance(statement, Element) and statement.family == "X":
@@ -327,12 +409,14 @@ class _Elaborator:
                     chain=next_chain,
                 )
             elif isinstance(statement, (Comment, Blank, Opaque)):
-                self.output.append(statement)
+                self._append_passthrough(statement)
 
     def run(self) -> ElaboratedDeck:
         top_mapping: dict[str, str] = {}
         end_statement: End | None = None
         for statement in self.deck.top:
+            if self.stopped:
+                break
             if isinstance(statement, Param):
                 continue
             if isinstance(statement, End):
@@ -355,17 +439,19 @@ class _Elaborator:
                     chain=(),
                 )
             elif isinstance(statement, (Model, Global, Comment, Blank, Opaque)):
-                self.output.append(statement)
-        if end_statement is not None:
-            self.output.append(end_statement)
+                self._append_passthrough(statement)
+        if end_statement is not None and not self.stopped:
+            self._append_passthrough(end_statement)
         return ElaboratedDeck(
             tuple(self.output), tuple(self.provenance), sorted_diagnostics(self.diagnostics)
         )
 
 
-def flatten(analysis: Analysis) -> ElaboratedDeck:
+def flatten(
+    analysis: Analysis, *, limits: ElaborationLimits = DEFAULT_ELABORATION_LIMITS
+) -> ElaboratedDeck:
     if analysis.deck is None:
         return ElaboratedDeck((), (), analysis.diagnostics)
     if analysis.has_errors:
         return ElaboratedDeck((), (), analysis.diagnostics)
-    return _Elaborator(analysis.deck).run()
+    return _Elaborator(analysis.deck, limits).run()
