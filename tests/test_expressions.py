@@ -56,6 +56,11 @@ def test_undefined_parameter_is_an_explicit_error():
         evaluate_expression(parse_expression("missing + 1"), {})
 
 
+def test_exponent_magnitude_is_bounded():
+    with pytest.raises(ExpressionError, match="magnitude"):
+        evaluate_expression(parse_expression("2^10001"), {})
+
+
 def test_formatters_are_deterministic():
     expression = parse_expression("{left+2*right}")
     assert format_expression(expression) == "{left + {2 * right}}"

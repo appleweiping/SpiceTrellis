@@ -275,4 +275,8 @@ def parse_text(text: str, filename: str = "<memory>") -> SyntaxDeck:
         except CardParseError as error:
             diagnostics.append(Diagnostic("ST1002", "error", str(error), card.span))
             statements.append(Opaque(card.code, str(error), _meta(card)))
+        except RecursionError:
+            reason = "statement exceeds the parser nesting limit"
+            diagnostics.append(Diagnostic("ST1004", "error", reason, card.span))
+            statements.append(Opaque(card.code, reason, _meta(card)))
     return SyntaxDeck(filename, tuple(statements), sorted_diagnostics(diagnostics))

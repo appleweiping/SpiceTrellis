@@ -16,6 +16,12 @@ from spicetrellis.parser import CardParseError, parse_text, split_fields
 from spicetrellis.source import logical_cards, split_inline_comment
 
 
+def test_deep_expression_is_a_diagnostic_instead_of_recursion_failure():
+    text = ".param x=" + "(" * 2_000 + "1" + ")" * 2_000
+    deck = parse_text(text)
+    assert {item.code for item in deck.diagnostics} == {"ST1004"}
+
+
 def test_logical_continuation_retains_physical_segments():
     cards, diagnostics = logical_cards("R1 a b {base\n+ * scale} $ note\n", "deck.sp")
     assert diagnostics == []

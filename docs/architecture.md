@@ -116,13 +116,18 @@ iteration.
 
 ## Public boundaries
 
-`spicetrellis.api` exports five operations:
+`spicetrellis.api` exports parsing, analysis, elaboration, formatting, inventory, deterministic
+mutation smoke testing, and structural-summary operations. The structural summary is emitted only
+after error-free semantic analysis and contains shared observations plus content digests; it does
+not grant trust to downstream consumers.
 
 - `parse_text`
 - `analyze_file`
 - `flatten`
 - `format_deck`
 - `inventory`
+- `fuzz_smoke`
+- `structural_summary`
 
 The CLI is a thin adapter over these functions. It owns file-output decisions
 and process exit codes; library functions do not terminate the process.

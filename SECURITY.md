@@ -25,6 +25,6 @@ shell, network service, plugin, or dynamic Python expression while reading a
 deck. Include paths are constrained after canonical resolution. Output files
 are written only when the caller explicitly supplies a destination.
 
-Version 0.1 does not provide process-level resource isolation. Applications
+SpiceTrellis does not provide process-level resource isolation. Applications
 accepting public uploads should enforce file-count, byte, CPU, and memory limits
 around the process.

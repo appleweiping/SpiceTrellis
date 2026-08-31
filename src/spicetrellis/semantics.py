@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 from spicetrellis.expressions import expression_names
@@ -31,6 +32,26 @@ from spicetrellis.model import (
 from spicetrellis.parser import parse_text
 
 
+@dataclass(frozen=True, slots=True)
+class AnalysisLimits:
+    """Resource limits applied while loading and expanding a SPICE project."""
+
+    max_file_bytes: int = 2 * 1024 * 1024
+    max_total_bytes: int = 10 * 1024 * 1024
+    max_files: int = 256
+    max_include_depth: int = 64
+    max_expanded_statements: int = 250_000
+
+    def __post_init__(self) -> None:
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if type(value) is not int or value < 1:
+                raise ValueError(f"{field.name} must be a positive integer")
+
+
+DEFAULT_ANALYSIS_LIMITS = AnalysisLimits()
+
+
 def _file_span(path: Path) -> SourceSpan:
     return SourceSpan(str(path), 1, 1, 1, 1)
 
@@ -40,16 +61,37 @@ def _inside(path: Path, roots: tuple[Path, ...]) -> bool:
 
 
 class _ProjectLoader:
-    def __init__(self, entry: Path, include_roots: tuple[Path, ...]) -> None:
+    def __init__(
+        self, entry: Path, include_roots: tuple[Path, ...], limits: AnalysisLimits
+    ) -> None:
         self.entry = entry
         self.roots = include_roots
+        self.limits = limits
         self.files: dict[Path, SyntaxDeck] = {}
+        self.source_bytes: dict[Path, bytes] = {}
         self.dependencies: set[Path] = set()
+        self.attempted: set[Path] = set()
+        self.total_bytes = 0
+        self.expanded_statements = 0
+        self.expansion_limit_reported = False
         self.diagnostics: list[Diagnostic] = []
 
     def _load(self, path: Path) -> SyntaxDeck | None:
         if path in self.files:
             return self.files[path]
+        if path in self.attempted:
+            return None
+        if len(self.attempted) >= self.limits.max_files:
+            self.diagnostics.append(
+                Diagnostic(
+                    "ST2007",
+                    "error",
+                    f"project exceeds the {self.limits.max_files}-file limit",
+                    _file_span(path),
+                )
+            )
+            return None
+        self.attempted.add(path)
         if not _inside(path, self.roots):
             self.diagnostics.append(
                 Diagnostic(
@@ -61,14 +103,51 @@ class _ProjectLoader:
             )
             return None
         try:
-            text = path.read_text(encoding="utf-8-sig")
+            remaining = self.limits.max_total_bytes - self.total_bytes
+            read_limit = min(self.limits.max_file_bytes, max(remaining, 0))
+            with path.open("rb") as source:
+                content = source.read(read_limit + 1)
+            if len(content) > self.limits.max_file_bytes:
+                self.diagnostics.append(
+                    Diagnostic(
+                        "ST2005",
+                        "error",
+                        f"SPICE file exceeds the {self.limits.max_file_bytes}-byte limit",
+                        _file_span(path),
+                    )
+                )
+                return None
+            if len(content) > remaining:
+                self.diagnostics.append(
+                    Diagnostic(
+                        "ST2006",
+                        "error",
+                        f"project exceeds the {self.limits.max_total_bytes}-byte limit",
+                        _file_span(path),
+                    )
+                )
+                return None
+            text = content.decode("utf-8-sig")
         except (OSError, UnicodeError) as error:
             self.diagnostics.append(
                 Diagnostic("ST2002", "error", f"cannot read SPICE file: {error}", _file_span(path))
             )
             return None
-        deck = parse_text(text, str(path))
+        try:
+            deck = parse_text(text, str(path))
+        except RecursionError:
+            self.diagnostics.append(
+                Diagnostic(
+                    "ST2009",
+                    "error",
+                    "SPICE syntax exceeds the parser nesting limit",
+                    _file_span(path),
+                )
+            )
+            return None
+        self.total_bytes += len(content)
         self.files[path] = deck
+        self.source_bytes[path] = content
         self.dependencies.add(path)
         self.diagnostics.extend(deck.diagnostics)
         return deck
@@ -80,12 +159,36 @@ class _ProjectLoader:
                 Diagnostic("ST2003", "error", f"include cycle detected: {cycle}", _file_span(path))
             )
             return []
+        if len(stack) >= self.limits.max_include_depth:
+            self.diagnostics.append(
+                Diagnostic(
+                    "ST2008",
+                    "error",
+                    f"include nesting exceeds the {self.limits.max_include_depth}-level limit",
+                    _file_span(path),
+                )
+            )
+            return []
         deck = self._load(path)
         if deck is None:
             return []
         expanded: list[Statement] = []
         for statement in deck.statements:
             if not isinstance(statement, Include):
+                if self.expanded_statements >= self.limits.max_expanded_statements:
+                    if not self.expansion_limit_reported:
+                        self.diagnostics.append(
+                            Diagnostic(
+                                "ST2010",
+                                "error",
+                                "expanded project exceeds the "
+                                f"{self.limits.max_expanded_statements}-statement limit",
+                                statement.meta.span,
+                            )
+                        )
+                        self.expansion_limit_reported = True
+                    continue
+                self.expanded_statements += 1
                 expanded.append(statement)
                 continue
             candidate = Path(statement.target)
@@ -458,19 +561,26 @@ def _build_semantic(
     )
 
 
-def analyze_file(path: str | Path, *, include_roots: tuple[str | Path, ...] = ()) -> Analysis:
+def analyze_file(
+    path: str | Path,
+    *,
+    include_roots: tuple[str | Path, ...] = (),
+    limits: AnalysisLimits = DEFAULT_ANALYSIS_LIMITS,
+) -> Analysis:
     entry = Path(path).resolve()
     roots = tuple(Path(root).resolve() for root in include_roots) or (entry.parent,)
     if not _inside(entry, roots):
         roots = (entry.parent, *roots)
-    loader = _ProjectLoader(entry, roots)
+    loader = _ProjectLoader(entry, roots, limits)
     expanded = loader.expand(entry)
     dependencies = tuple(sorted(loader.dependencies, key=lambda item: str(item).casefold()))
     files = tuple(loader.files[path] for path in dependencies)
     if entry not in loader.files:
-        return Analysis(None, sorted_diagnostics(loader.diagnostics), dependencies)
+        snapshots = tuple((path, loader.source_bytes[path]) for path in dependencies)
+        return Analysis(None, sorted_diagnostics(loader.diagnostics), dependencies, snapshots)
     deck = _build_semantic(entry, files, expanded, dependencies, loader.diagnostics)
-    return Analysis(deck, sorted_diagnostics(loader.diagnostics), dependencies)
+    snapshots = tuple((path, loader.source_bytes[path]) for path in dependencies)
+    return Analysis(deck, sorted_diagnostics(loader.diagnostics), dependencies, snapshots)
 
 
 def inventory(analysis: Analysis) -> CircuitInventory:
