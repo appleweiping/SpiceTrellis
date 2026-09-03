@@ -93,6 +93,34 @@ spice-trellis lint examples/hierarchical_filter/broken.sp
 
 ## CLI reference
 
+The command line exposes six subcommands, each taking exactly one input path as
+its only positional argument:
+
+- `parse`: syntax JSON for a single file.
+- `lint`: include-following analysis and diagnostics.
+- `flatten`: deterministic hierarchy expansion.
+- `format`: canonical rendering of a single file.
+- `inventory`: structural summary of an analyzed project.
+- `fuzz-smoke`: bounded deterministic parser mutation counters.
+
+`parse`, `lint`, `inventory`, and `fuzz-smoke` always write to standard output.
+`flatten` and `format` write to standard output unless `-o`/`--output` names a
+file. `lint` renders diagnostics as its result and `parse` embeds them in its
+JSON; `flatten`, `format`, and `inventory` instead write blocking diagnostics to
+standard error and produce no artifact. `--include-root` is accepted by the
+three commands that follow includes (`lint`, `flatten`, and `inventory`) and may
+be repeated.
+
+`spice-trellis <command> --help` prints the options for one subcommand.
+
+```bash
+spice-trellis --version
+```
+
+```text
+spice-trellis 0.2.0
+```
+
 ### Parse one file
 
 ```bash
@@ -113,6 +141,23 @@ spice-trellis lint project/circuit.sp --include-root project --include-root shar
 The entry file's directory is permitted automatically. Additional include
 roots must be supplied explicitly. Resolved include paths outside all roots are
 errors, including paths that escape through a symbolic link.
+
+Every problem is reported with a stable code and a source location. The command
+exits 1 when any diagnostic is an error:
+
+```bash
+spice-trellis lint examples/hierarchical_filter/broken.sp
+```
+
+```text
+examples\hierarchical_filter\broken.sp:1:1: error ST2003: include cycle detected: broken.sp -> cycle_a.sp -> broken.sp
+examples\hierarchical_filter\broken.sp:3:1: error ST2101: duplicate parameter 'repeated'
+examples\hierarchical_filter\broken.sp:4:1: error ST2207: unknown subcircuit 'absent_cell'
+```
+
+Each line is prefixed with the resolved absolute path; the prefix is shortened
+above. A clean deck prints `no diagnostics` and exits 0. `--json` emits the same
+diagnostics as a structured array instead.
 
 ### Flatten hierarchy
 
@@ -140,10 +185,36 @@ does not modify the file.
 
 ```bash
 spice-trellis inventory circuit.sp
+spice-trellis inventory circuit.sp --interop
 ```
 
 The JSON result includes source-file and include counts, subcircuit pin lists,
-element-family counts, parameters, and models.
+element-family counts, parameters, and models. `--interop` replaces it with the
+versioned `org.spice-tools.structural-summary` document, which adds a producer
+record and a SHA-256 for every contributing file, reports case-folded parameter
+names, and reduces subcircuits to a count. Both forms refuse to emit a summary
+for a deck that contains errors.
+
+### Robustness smoke test
+
+```bash
+spice-trellis fuzz-smoke examples/hierarchical_filter/top.sp
+spice-trellis fuzz-smoke circuit.sp --cases 512 --seed 7
+```
+
+```text
+{
+  "bytes_examined": 25240,
+  "cases": 128,
+  "diagnostics": 48
+}
+```
+
+Bounded deterministic byte-level mutations are parsed in memory and the work is
+reported as counters. `--cases` defaults to 128 and must be between 1 and 10000;
+`--seed` defaults to 0. The same file, case count, and seed always produce the
+same counters. This is a parser robustness check, not exhaustive fuzzing and not
+electrical validation.
 
 ## Python API
 
