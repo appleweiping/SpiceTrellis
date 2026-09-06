@@ -22,6 +22,10 @@ unique files, 64 include levels, and 250,000 expanded statements by default. Rea
 configured boundary before parsing, repeated failed paths are not reopened, and limit violations
 are returned as structured diagnostics (`ST2005` through `ST2010`). Applications may pass a stricter
 immutable limit set to `analyze_file(..., limits=AnalysisLimits(...))`.
+A `.lib` section call obeys the same include-root confinement and nesting limit as an
+`.include`, and the structure of a library file is checked in every file that is expanded
+rather than only in files a call opens, so an unclosed section is reported (`ST2014`)
+instead of silently discarding the cards that follow it.
 Excessively nested in-memory expressions are likewise converted to the `ST1004` diagnostic instead
 of exposing a Python recursion failure.
 Expression evaluation bounds exponent magnitude at 10,000 to keep a syntactically valid parameter

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import TypeAlias
 
 from spicetrellis.expressions import expression_names
 from spicetrellis.model import (
@@ -18,6 +19,9 @@ from spicetrellis.model import (
     End,
     Global,
     Include,
+    LibCall,
+    LibSectionEnd,
+    LibSectionStart,
     Model,
     Param,
     SemanticDeck,
@@ -52,6 +56,12 @@ class AnalysisLimits:
 DEFAULT_ANALYSIS_LIMITS = AnalysisLimits()
 
 
+# One entry on the expansion stack: a file, plus the library section being
+# read from it. Keeping the section in the key lets one file be opened for
+# two different corners without that looking like a cycle.
+_Frame: TypeAlias = tuple[Path, str | None]
+
+
 def _file_span(path: Path) -> SourceSpan:
     return SourceSpan(str(path), 1, 1, 1, 1)
 
@@ -73,6 +83,7 @@ class _ProjectLoader:
         self.attempted: set[Path] = set()
         self.total_bytes = 0
         self.expanded_statements = 0
+        self.section_cache: dict[Path, dict[str, tuple[Statement, ...]]] = {}
         self.expansion_limit_reported = False
         self.diagnostics: list[Diagnostic] = []
 
@@ -152,9 +163,114 @@ class _ProjectLoader:
         self.diagnostics.extend(deck.diagnostics)
         return deck
 
-    def expand(self, path: Path, stack: tuple[Path, ...] = ()) -> list[Statement]:
-        if path in stack:
-            cycle = " -> ".join(item.name for item in (*stack, path))
+    def sections(self, path: Path) -> dict[str, tuple[Statement, ...]]:
+        """Return the named ``.lib`` sections of one file, validating the blocks.
+
+        A file is scanned once and the result cached, so a deck that selects two
+        corners from the same library does not pay for it twice and cannot be
+        given two different answers.
+        """
+
+        cached = self.section_cache.get(path)
+        if cached is not None:
+            return cached
+        deck = self._load(path)
+        found: dict[str, tuple[Statement, ...]] = {}
+        if deck is None:
+            self.section_cache[path] = found
+            return found
+        open_name: str | None = None
+        open_span: SourceSpan | None = None
+        body: list[Statement] = []
+        for statement in deck.statements:
+            if isinstance(statement, LibSectionStart):
+                if open_name is not None:
+                    self.diagnostics.append(
+                        Diagnostic(
+                            "ST2015",
+                            "error",
+                            f"library section {statement.name!r} opens inside section "
+                            f"{open_name!r}; sections do not nest",
+                            statement.meta.span,
+                        )
+                    )
+                    continue
+                if statement.name.casefold() in found:
+                    self.diagnostics.append(
+                        Diagnostic(
+                            "ST2012",
+                            "error",
+                            f"library section {statement.name!r} is defined more than once",
+                            statement.meta.span,
+                        )
+                    )
+                open_name = statement.name
+                open_span = statement.meta.span
+                body = []
+                continue
+            if isinstance(statement, LibSectionEnd):
+                if open_name is None:
+                    self.diagnostics.append(
+                        Diagnostic(
+                            "ST2013",
+                            "error",
+                            ".endl has no open library section",
+                            statement.meta.span,
+                        )
+                    )
+                    continue
+                if statement.name and statement.name.casefold() != open_name.casefold():
+                    self.diagnostics.append(
+                        Diagnostic(
+                            "ST2013",
+                            "error",
+                            f".endl names {statement.name!r} but closes section {open_name!r}",
+                            statement.meta.span,
+                        )
+                    )
+                found[open_name.casefold()] = tuple(body)
+                open_name = None
+                open_span = None
+                body = []
+                continue
+            if open_name is not None:
+                body.append(statement)
+        if open_name is not None:
+            self.diagnostics.append(
+                Diagnostic(
+                    "ST2014",
+                    "error",
+                    f"library section {open_name!r} is never closed by .endl",
+                    open_span if open_span is not None else _file_span(path),
+                )
+            )
+            found[open_name.casefold()] = tuple(body)
+        self.section_cache[path] = found
+        return found
+
+    def _resolve(self, path: Path, target: str, span: SourceSpan, label: str) -> Path | None:
+        """Resolve a referenced file against the deck and the allowed roots."""
+
+        candidate = Path(target)
+        resolved = (
+            candidate.resolve() if candidate.is_absolute() else (path.parent / candidate).resolve()
+        )
+        if not _inside(resolved, self.roots):
+            self.diagnostics.append(
+                Diagnostic(
+                    "ST2004",
+                    "error",
+                    f"{label} path escapes the allowed roots: {target}",
+                    span,
+                )
+            )
+            return None
+        return resolved
+
+    def expand(self, path: Path, stack: tuple[_Frame, ...] = ()) -> list[Statement]:
+        frame: _Frame = (path, None)
+        if frame in stack:
+            cycle = " -> ".join(item[0].name for item in (*stack, frame))
             self.diagnostics.append(
                 Diagnostic("ST2003", "error", f"include cycle detected: {cycle}", _file_span(path))
             )
@@ -172,8 +288,35 @@ class _ProjectLoader:
         deck = self._load(path)
         if deck is None:
             return []
+        # Validate the section structure of every file that is expanded, not
+        # only of files a .lib call opens. An unterminated section swallows
+        # everything after it, so a deck that opens one by accident -- the
+        # one-argument .lib form of another dialect does exactly that -- must
+        # hear about it rather than quietly lose half its cards.
+        self.sections(path)
+        return self._expand_statements(deck.statements, path, (*stack, frame))
+
+    def _expand_statements(
+        self, statements: tuple[Statement, ...], path: Path, stack: tuple[_Frame, ...]
+    ) -> list[Statement]:
         expanded: list[Statement] = []
-        for statement in deck.statements:
+        # A library section is inert until something calls it, so a section block
+        # reached by ordinary expansion contributes nothing. Including a library
+        # file wholesale therefore yields none of its corners, which is exactly
+        # what selecting one by name is for.
+        depth = 0
+        for statement in statements:
+            if isinstance(statement, LibSectionStart):
+                depth += 1
+                continue
+            if isinstance(statement, LibSectionEnd):
+                depth = max(depth - 1, 0)
+                continue
+            if depth:
+                continue
+            if isinstance(statement, LibCall):
+                expanded.extend(self._expand_call(statement, path, stack))
+                continue
             if not isinstance(statement, Include):
                 if self.expanded_statements >= self.limits.max_expanded_statements:
                     if not self.expansion_limit_reported:
@@ -191,24 +334,60 @@ class _ProjectLoader:
                 self.expanded_statements += 1
                 expanded.append(statement)
                 continue
-            candidate = Path(statement.target)
-            resolved = (
-                candidate.resolve()
-                if candidate.is_absolute()
-                else (path.parent / candidate).resolve()
-            )
-            if not _inside(resolved, self.roots):
-                self.diagnostics.append(
-                    Diagnostic(
-                        "ST2004",
-                        "error",
-                        f"include path escapes the allowed roots: {statement.target}",
-                        statement.meta.span,
-                    )
-                )
+            resolved = self._resolve(path, statement.target, statement.meta.span, "include")
+            if resolved is None:
                 continue
-            expanded.extend(self.expand(resolved, (*stack, path)))
+            expanded.extend(self.expand(resolved, stack))
         return expanded
+
+    def _expand_call(
+        self, statement: LibCall, path: Path, stack: tuple[_Frame, ...]
+    ) -> list[Statement]:
+        """Inline one named section, guarding against a section that calls itself."""
+
+        resolved = self._resolve(path, statement.target, statement.meta.span, "library")
+        if resolved is None:
+            return []
+        frame: _Frame = (resolved, statement.section.casefold())
+        if frame in stack:
+            cycle = " -> ".join(
+                f"{item[0].name}({item[1]})" if item[1] else item[0].name
+                for item in (*stack, frame)
+            )
+            self.diagnostics.append(
+                Diagnostic(
+                    "ST2016",
+                    "error",
+                    f"library section cycle detected: {cycle}",
+                    statement.meta.span,
+                )
+            )
+            return []
+        if len(stack) >= self.limits.max_include_depth:
+            self.diagnostics.append(
+                Diagnostic(
+                    "ST2008",
+                    "error",
+                    f"include nesting exceeds the {self.limits.max_include_depth}-level limit",
+                    statement.meta.span,
+                )
+            )
+            return []
+        sections = self.sections(resolved)
+        body = sections.get(statement.section.casefold())
+        if body is None:
+            available = ", ".join(sorted(sections)) or "none"
+            self.diagnostics.append(
+                Diagnostic(
+                    "ST2011",
+                    "error",
+                    f"library section {statement.section!r} is not defined in "
+                    f"{statement.target}; available sections: {available}",
+                    statement.meta.span,
+                )
+            )
+            return []
+        return self._expand_statements(body, resolved, (*stack, frame))
 
 
 def _strong_components(graph: dict[str, set[str]]) -> list[tuple[str, ...]]:
@@ -585,13 +764,15 @@ def analyze_file(
 
 def inventory(analysis: Analysis) -> CircuitInventory:
     if analysis.deck is None:
-        return CircuitInventory(0, 0, (), (), (), ())
+        return CircuitInventory(0, 0, 0, (), (), (), ())
     deck = analysis.deck
     families: Counter[str] = Counter()
     models: set[str] = set()
     includes = 0
+    library_sections = 0
     for syntax in deck.files:
         includes += sum(isinstance(statement, Include) for statement in syntax.statements)
+        library_sections += sum(isinstance(statement, LibCall) for statement in syntax.statements)
         for statement in syntax.statements:
             if isinstance(statement, Element):
                 families[statement.family] += 1
@@ -614,6 +795,7 @@ def inventory(analysis: Analysis) -> CircuitInventory:
     return CircuitInventory(
         len(deck.files),
         includes,
+        library_sections,
         subcircuits,
         tuple(sorted(families.items())),
         tuple(sorted(parameters, key=str.casefold)),

@@ -84,6 +84,38 @@ class Include:
 
 
 @dataclass(frozen=True, slots=True)
+class LibCall:
+    """A request for one named section of a library file.
+
+    This is the two-argument ``.lib PATH SECTION`` form, which is how a deck
+    selects a PDK corner. The one-argument form is deliberately not accepted:
+    dialects disagree about whether it includes a whole file or opens a section,
+    and guessing would silently change which device models a circuit is built
+    from. Use ``.include`` for a whole file.
+    """
+
+    target: str
+    section: str
+    meta: CardMeta
+
+
+@dataclass(frozen=True, slots=True)
+class LibSectionStart:
+    """The opening of a ``.lib SECTION`` block inside a library file."""
+
+    name: str
+    meta: CardMeta
+
+
+@dataclass(frozen=True, slots=True)
+class LibSectionEnd:
+    """A ``.endl`` card, optionally naming the section it closes."""
+
+    name: str | None
+    meta: CardMeta
+
+
+@dataclass(frozen=True, slots=True)
 class Param:
     assignments: tuple[Assignment, ...]
     meta: CardMeta
@@ -147,6 +179,9 @@ Statement: TypeAlias = (
     Blank
     | Comment
     | Include
+    | LibCall
+    | LibSectionStart
+    | LibSectionEnd
     | Param
     | SubcktStart
     | SubcktEnd
@@ -231,6 +266,7 @@ class ElaboratedDeck:
 class CircuitInventory:
     files: int
     includes: int
+    library_sections: int
     subcircuits: tuple[dict[str, Any], ...]
     element_families: tuple[tuple[str, int], ...]
     parameters: tuple[str, ...]
@@ -240,6 +276,7 @@ class CircuitInventory:
         return {
             "files": self.files,
             "includes": self.includes,
+            "library_sections": self.library_sections,
             "subcircuits": list(self.subcircuits),
             "element_families": dict(self.element_families),
             "parameters": list(self.parameters),

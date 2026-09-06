@@ -17,6 +17,9 @@ from spicetrellis.model import (
     End,
     Global,
     Include,
+    LibCall,
+    LibSectionEnd,
+    LibSectionStart,
     Model,
     Opaque,
     Param,
@@ -39,18 +42,26 @@ def _commented(rendered: str, statement: Statement) -> str:
     return f"{rendered} {marker} {comment}"
 
 
+def _quoted(value: str) -> str:
+    """Quote a path only when it needs it, so round-tripping stays byte-stable."""
+
+    return f'"{value}"' if any(character.isspace() for character in value) else value
+
+
 def format_statement(statement: Statement) -> str:
     if isinstance(statement, Blank):
         return ""
     if isinstance(statement, Comment):
         return "*" if not statement.text else f"* {statement.text}"
     if isinstance(statement, Include):
-        target = (
-            f'"{statement.target}"'
-            if any(character.isspace() for character in statement.target)
-            else statement.target
-        )
-        return _commented(f".include {target}", statement)
+        return _commented(f".include {_quoted(statement.target)}", statement)
+    if isinstance(statement, LibCall):
+        return _commented(f".lib {_quoted(statement.target)} {statement.section}", statement)
+    if isinstance(statement, LibSectionStart):
+        return _commented(f".lib {statement.name}", statement)
+    if isinstance(statement, LibSectionEnd):
+        rendered = ".endl" + (f" {statement.name}" if statement.name else "")
+        return _commented(rendered, statement)
     if isinstance(statement, Param):
         rendered = ".param " + " ".join(_assignment(item) for item in statement.assignments)
         return _commented(rendered, statement)

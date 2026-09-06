@@ -12,7 +12,7 @@
   },
   "runtime": {
     "distribution_version": "0.2.0",
-    "source_sha256": "1b4c6a43db3c3399da413fbdf6d41962a0b901505225481074f83c849a1636f6"
+    "source_sha256": "7e795f55f60bcc3a61c0bec3b79334c7c835d9392c1203492caa71df2742893b"
   },
   "command": "python benchmarks/benchmark.py --iterations 25",
   "expected": {"decks_per_iteration": 2, "elements_per_iteration": 23},
