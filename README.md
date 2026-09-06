@@ -23,10 +23,13 @@ understand a deck before choosing how or where to simulate it.
 - Primitive `R`, `C`, `L`, `V`, `I`, and `M` cards plus hierarchical `X`
   instances.
 - `.include`, `.param`, `.subckt`, `.ends`, `.model`, `.global`, and `.end`.
+- `.lib FILE SECTION` corner selection, with `.lib SECTION` / `.endl` section
+  definitions; only the named section is inlined.
 - A deliberately small arithmetic expression language with parameter names,
   `+`, `-`, `*`, `/`, integer powers, parentheses, braces, and common SPICE
   scale suffixes.
-- Include-root confinement, include-cycle detection, duplicate-symbol checks,
+- Include-root confinement, include- and section-cycle detection,
+  library-section structure checks, duplicate-symbol checks,
   parameter dependency analysis, subcircuit arity checking, and recursive-call
   detection.
 - Deterministic flattening with hierarchical element/node names and a source
@@ -215,6 +218,57 @@ reported as counters. `--cases` defaults to 128 and must be between 1 and 10000;
 `--seed` defaults to 0. The same file, case count, and seed always produce the
 same counters. This is a parser robustness check, not exhaustive fuzzing and not
 electrical validation.
+
+
+## Library sections and corners
+
+A PDK ships one library file holding several corners, and a deck selects one by
+name:
+
+```spice
+* inverter, typical corner
+.lib "corners.lib" tt
+M1 out in vdd vdd pch w=2u l=0.18u
+M2 out in 0   0   nch w=1u l=0.18u
+.end
+```
+
+```spice
+* corners.lib
+.lib tt
+.model nch nmos level=1 vto=0.50
+.endl tt
+
+.lib ff
+.model nch nmos level=1 vto=0.42
+.endl ff
+```
+
+Only the named section is inlined. Section names are matched without regard to
+case, one file may supply two different sections to the same deck, and a section
+may itself `.include` a file or call another section. A section is inert until
+something calls it, so `.include`-ing a library file wholesale contributes none
+of its corners -- which is the point of choosing one by name.
+
+The one-argument `.lib FILE` form that some dialects read as "include this whole
+file" is deliberately not accepted, because other dialects read the same card as
+the opening of a section. Guessing between them would silently change which
+device models a circuit is built from. SpiceTrellis reads a single argument as a
+section opening and reports `ST2014` when no `.endl` closes it, so a deck
+written in the other dialect gets a clear error rather than a deck whose
+remaining cards have quietly disappeared. Use `.include` for a whole file.
+
+| Code | Meaning |
+|---|---|
+| `ST2011` | the named section is not defined in that file; the message lists the ones that are |
+| `ST2012` | a section name is defined more than once in one file |
+| `ST2013` | `.endl` has no open section, or names a different one |
+| `ST2014` | a section is never closed by `.endl` |
+| `ST2015` | a section opens inside another; sections do not nest |
+| `ST2016` | a section call cycle |
+
+Library paths obey the same include-root confinement as `.include`, and a
+section call counts against the same nesting limit.
 
 ## Python API
 

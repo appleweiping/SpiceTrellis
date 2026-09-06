@@ -168,6 +168,7 @@ def test_inventory_for_failed_load_is_empty(tmp_path):
     assert result.as_dict() == {
         "files": 0,
         "includes": 0,
+        "library_sections": 0,
         "subcircuits": [],
         "element_families": {},
         "parameters": [],

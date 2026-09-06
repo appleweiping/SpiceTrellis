@@ -15,6 +15,9 @@ from spicetrellis.model import (
     End,
     Global,
     Include,
+    LibCall,
+    LibSectionEnd,
+    LibSectionStart,
     Model,
     Opaque,
     Param,
@@ -212,6 +215,24 @@ def _parse_card(card: LogicalCard) -> Statement:
             if len(fields) != 2:
                 raise CardParseError(".include requires exactly one quoted or unquoted path")
             return Include(_unquote(fields[1]), meta)
+        if lowered == ".lib":
+            # Two arguments name a file and a section; one argument opens a
+            # section. The one-argument *call* form some dialects allow is
+            # refused rather than guessed, because reading it as a section
+            # opening -- or the reverse -- would change which models are used
+            # without saying so.
+            if len(fields) == 3:
+                return LibCall(_unquote(fields[1]), _unquote(fields[2]), meta)
+            if len(fields) == 2:
+                section = _unquote(fields[1])
+                if not _IDENTIFIER.fullmatch(section):
+                    raise CardParseError(".lib requires a valid section name")
+                return LibSectionStart(section, meta)
+            raise CardParseError(".lib requires a section name, or a path and a section name")
+        if lowered == ".endl":
+            if len(fields) > 2:
+                raise CardParseError(".endl accepts at most one section name")
+            return LibSectionEnd(_unquote(fields[1]) if len(fields) == 2 else None, meta)
         if lowered == ".param":
             if len(fields) < 2:
                 raise CardParseError(".param requires at least one assignment")

@@ -3,6 +3,26 @@
 All notable changes to this project will be documented in this file. The format
 follows Keep a Changelog, and versions follow Semantic Versioning.
 
+## [Unreleased]
+
+- Added `.lib FILE SECTION` corner selection and `.lib SECTION` / `.endl` section
+  definitions. Only the named section is inlined; a section is inert until called,
+  so including a library file wholesale still contributes none of its corners.
+  Section names match without regard to case, one file may supply two sections to
+  the same deck, and a section may `.include` a file or call another section.
+- Added `ST2011` through `ST2016` for an undefined section, a duplicated section,
+  a stray or mismatched `.endl`, an unclosed section, nested sections, and a
+  section call cycle. Library paths obey the same include-root confinement as
+  `.include`, and section calls count against the same nesting limit.
+- The one-argument `.lib FILE` form of other dialects is read as a section opening
+  and reported as unclosed rather than guessed. Dialects disagree about whether
+  that card includes a file or opens a section, and choosing silently would change
+  which device models a circuit is built from. Section structure is now validated
+  in every expanded file, not only in files a call opens, so a deck that opens a
+  section by accident is told so instead of quietly losing every card after it.
+- `CircuitInventory` gained a `library_sections` count of resolved section calls.
+  The `structural-summary` interop schema is unchanged.
+
 ## [0.2.0] - 2026-08-31
 
 ### Added
