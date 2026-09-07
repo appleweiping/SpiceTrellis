@@ -17,6 +17,7 @@ from spicetrellis.api import (
     structural_summary,
 )
 from spicetrellis.emit import format_diagnostics, to_json
+from spicetrellis.provenance import Origin, build_index
 from spicetrellis.semantics import DEFAULT_ANALYSIS_LIMITS
 
 
@@ -73,6 +74,59 @@ def _command_flatten(args: argparse.Namespace) -> int:
     return 0
 
 
+def _command_locate(args: argparse.Namespace) -> int:
+    result = analyze_file(args.path, include_roots=_roots(args))
+    if result.has_errors:
+        sys.stderr.write(format_diagnostics(result.diagnostics))
+        return 1
+    flattened = flatten(result)
+    if flattened.has_errors:
+        sys.stderr.write(format_diagnostics(flattened.diagnostics))
+        return 1
+    index = build_index(flattened)
+
+    if args.source is not None:
+        filename, _, raw_line = args.source.rpartition(":")
+        if not filename or not raw_line.isdigit():
+            sys.stderr.write("--source must be written as FILE:LINE\n")
+            return 2
+        resolved = str(Path(filename).resolve())
+        use = index.by_source(resolved, int(raw_line))
+        if args.json:
+            _write_or_print(to_json(use.as_dict()), args.output)
+            return 0
+        # No card is a real answer, not a failure: a line inside a subcircuit
+        # nothing instantiates produces nothing, and that is worth seeing.
+        if not use.copies:
+            print(f"{args.source} produced no card in the flattened deck")
+            return 0
+        print(f"{args.source} produced {use.copies} card(s):")
+        for produced in use.origins:
+            print(f"  {produced.output_name} (card {produced.output_index})")
+        return 0
+
+    if args.under is not None:
+        path = tuple(part for part in args.under.split("/") if part)
+        found = index.under(path)
+        if args.json:
+            _write_or_print(to_json([item.as_dict() for item in found]), args.output)
+            return 0
+        print(f"{args.under} expanded to {len(found)} card(s):")
+        for produced in found:
+            print(f"  {produced.output_name} (card {produced.output_index})")
+        return 0
+
+    origin: Origin | None = index.resolve(args.card) if args.card is not None else None
+    if origin is None:
+        sys.stderr.write(f"no flattened card named or numbered {args.card!r}\n")
+        return 1
+    if args.json:
+        _write_or_print(to_json(origin.as_dict()), args.output)
+        return 0
+    print(origin.describe())
+    return 0
+
+
 def _command_format(args: argparse.Namespace) -> int:
     path = Path(args.path)
     original = _read(path)
@@ -124,6 +178,24 @@ def _parser() -> argparse.ArgumentParser:
     flatten_command.add_argument("--provenance")
     flatten_command.add_argument("--include-root", action="append", default=[])
     flatten_command.set_defaults(handler=_command_flatten)
+
+    locate = subparsers.add_parser(
+        "locate", help="trace a flattened card back to its source, or a source line forward"
+    )
+    locate.add_argument("path")
+    locate.add_argument(
+        "card",
+        nargs="?",
+        help="flattened card name, or its output index; tried as a name first",
+    )
+    locate.add_argument("--source", help="instead report every card one FILE:LINE produced")
+    locate.add_argument(
+        "--under", help="instead report every card produced beneath an INSTANCE/PATH"
+    )
+    locate.add_argument("--include-root", action="append", default=[])
+    locate.add_argument("--json", action="store_true")
+    locate.add_argument("-o", "--output")
+    locate.set_defaults(handler=_command_locate)
 
     formatter = subparsers.add_parser("format", help="render a canonical portable-SPICE deck")
     formatter.add_argument("path")

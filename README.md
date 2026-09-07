@@ -88,6 +88,63 @@ Names encode the instance path, but source-map entries retain the original
 subcircuit definition and every expansion site. Generated names are stable for
 the same input and do not depend on Python hash iteration order.
 
+## Asking the source map questions
+
+Flattening writes a source map. Until now it was only a file: a caller who
+wanted to use it had to load it and search it themselves, which is the work the
+map was supposed to save.
+
+**Backwards**, when a simulator blames a card and you need the line that
+produced it:
+
+```console
+spice-trellis locate top.sp Xfilter__Xsecond__Cshunt --include-root .
+```
+
+```
+Xfilter__Xsecond__Cshunt (card 8)
+  expanded at .../top.sp:5:1
+    expanded at .../cells/passive stages.sp:10:1
+      defined at .../cells/passive stages.sp:4:1
+```
+
+The answer is a chain, not a line. A subcircuit instantiated twice produces two
+cards from one definition, and the definition alone does not say which copy
+failed; the expansion sites do.
+
+**Forwards**, when you are about to edit a line and need to know what it
+becomes:
+
+```console
+spice-trellis locate top.sp --source 'cells/passive stages.sp:3' --include-root .
+```
+
+```
+cells/passive stages.sp:3 produced 2 card(s):
+  Xfilter__Xfirst__Rseries (card 5)
+  Xfilter__Xsecond__Rseries (card 7)
+```
+
+A line that produces nothing reports that plainly rather than failing: a
+statement inside a subcircuit nothing instantiates reaches no card, and that is
+usually the thing worth knowing.
+
+**A whole subtree**, when the blame lands on an instance rather than a card:
+
+```console
+spice-trellis locate top.sp --under Xfilter --include-root .
+```
+
+Every physical line of a continued statement resolves to the same card, since a
+reader pointing at any of them means the same statement. A card is looked up by
+name first and only then by output index, because a deck may legitimately
+contain a card named with digits and a lookup should not depend on what else is
+in the deck.
+
+`--json` writes the same answers as a document. `spicetrellis.provenance` also
+rebuilds an index from a map that was written out and read back, so a saved map
+answers exactly what a fresh one does.
+
 The intentionally broken example demonstrates multi-error reporting:
 
 ```bash
@@ -167,6 +224,9 @@ diagnostics as a structured array instead.
 ```bash
 spice-trellis flatten circuit.sp
 spice-trellis flatten circuit.sp -o circuit.flat.sp --provenance circuit.map.json
+spice-trellis locate circuit.sp CARD_NAME
+spice-trellis locate circuit.sp --source FILE:LINE
+spice-trellis locate circuit.sp --under INSTANCE/PATH
 ```
 
 Flattening is refused when analysis contains an error. SpiceTrellis never emits

@@ -5,6 +5,26 @@ follows Keep a Changelog, and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `spice-trellis locate`: query the source map instead of loading and searching it by hand.
+  Backwards from a flattened card to the definition and every instance site the expansion passed
+  through; forwards from a source line to every card it produced; and over a whole instance path
+  when the blame lands on a subcircuit rather than a card.
+- A card is reported with its full expansion chain rather than only its definition, because a
+  subcircuit instantiated twice yields two cards from one definition and the definition alone
+  does not say which copy failed.
+- A source line that produces no card reports that plainly rather than failing. A statement
+  inside a subcircuit nothing instantiates reaches no card, which is usually the thing worth
+  knowing.
+- Every physical line of a continued statement resolves to the same card, since a reader
+  pointing at any of them means the same statement.
+- A query is matched as a name before an output index, because a deck may legitimately contain a
+  card named with digits and a lookup should not depend on what else is in the deck.
+- `spicetrellis.provenance` as a Python API: `build_index`, `index_from_entries`,
+  `ProvenanceIndex`, and `Origin`. An index rebuilt from a map that was written out and read back
+  answers exactly what a fresh one does.
+
 - Added `.lib FILE SECTION` corner selection and `.lib SECTION` / `.endl` section
   definitions. Only the named section is inlined; a section is inert until called,
   so including a library file wholesale still contributes none of its corners.
