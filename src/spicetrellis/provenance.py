@@ -215,23 +215,34 @@ def index_from_entries(entries: Iterable[Any]) -> ProvenanceIndex:
     return ProvenanceIndex(_provenance_from(entry) for entry in entries)
 
 
+def _line_col(value: Any, context: str) -> tuple[int, int]:
+    """Validate one line/column pair and hand back the narrowed values.
+
+    Returning them is what keeps this honest. Checking the shape and then
+    asserting it again for the type checker would put the guarantee in a
+    statement the interpreter discards under `-O`, which is exactly where a
+    validator must not keep one.
+    """
+
+    if (
+        not isinstance(value, list)
+        or len(value) != 2
+        or any(isinstance(item, bool) or not isinstance(item, int) for item in value)
+    ):
+        raise ValueError(f"{context} must be two integers")
+    first, second = value
+    return int(first), int(second)
+
+
 def _span_from(value: Any, context: str) -> SourceSpan:
     if not isinstance(value, dict):
         raise ValueError(f"{context} must be an object")
     filename = value.get("file")
-    start = value.get("start")
-    end = value.get("end")
     if not isinstance(filename, str):
         raise ValueError(f"{context} file must be a string")
-    for label, pair in (("start", start), ("end", end)):
-        if (
-            not isinstance(pair, list)
-            or len(pair) != 2
-            or any(isinstance(item, bool) or not isinstance(item, int) for item in pair)
-        ):
-            raise ValueError(f"{context} {label} must be two integers")
-    assert isinstance(start, list) and isinstance(end, list)
-    return SourceSpan(filename, start[0], start[1], end[0], end[1])
+    start_line, start_col = _line_col(value.get("start"), f"{context} start")
+    end_line, end_col = _line_col(value.get("end"), f"{context} end")
+    return SourceSpan(filename, start_line, start_col, end_line, end_col)
 
 
 def _provenance_from(value: Any) -> Provenance:
