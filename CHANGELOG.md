@@ -5,6 +5,8 @@ follows Keep a Changelog, and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-07
+
 ### Added
 
 - `spice-trellis locate`: query the source map instead of loading and searching it by hand.
