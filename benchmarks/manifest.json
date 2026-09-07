@@ -11,7 +11,7 @@
     ]
   },
   "runtime": {
-    "distribution_version": "0.2.0",
+    "distribution_version": "0.3.0",
     "source_sha256": "eeffc2196c7310673ff9004c7c314d917e79adc9bc9352dc9a6aec6d634aa336"
   },
   "command": "python benchmarks/benchmark.py --iterations 25",

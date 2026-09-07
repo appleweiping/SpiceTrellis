@@ -178,7 +178,7 @@ spice-trellis --version
 ```
 
 ```text
-spice-trellis 0.2.0
+spice-trellis 0.3.0
 ```
 
 ### Parse one file
