@@ -13,6 +13,10 @@ class ExpressionError(ValueError):
     """Raised when an expression is outside the supported portable subset."""
 
 
+class ExpressionLimitError(ExpressionError):
+    """Raised when an otherwise parseable expression exceeds a resource limit."""
+
+
 @dataclass(frozen=True, slots=True)
 class Number:
     value: Decimal
@@ -40,8 +44,8 @@ class Binary:
 Expr: TypeAlias = Number | Name | Unary | Binary
 
 _NUMBER = re.compile(
-    r"(?:(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)(?:meg|mil|[tgkmunpf])?",
-    re.IGNORECASE,
+    r"(?:(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)(?:meg|mil|[tgkmunpf])?",
+    re.IGNORECASE | re.ASCII,
 )
 _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.$]*")
 _SCALES = {
@@ -57,6 +61,10 @@ _SCALES = {
     "f": Decimal("1e-15"),
 }
 _MAX_EXPONENT_MAGNITUDE = Decimal("10000")
+_MAX_EXPRESSION_DEPTH = 256
+_MAX_EXPRESSION_NODES = 512
+_MAX_EXPRESSION_TOKENS = 1_024
+_MAX_NUMBER_CHARS = 128
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,9 +78,13 @@ def _tokens(text: str) -> list[_Token]:
     result: list[_Token] = []
     index = 0
     while index < len(text):
-        if text[index].isspace():
+        if text[index] in " \t\r\n":
             index += 1
             continue
+        if len(result) >= _MAX_EXPRESSION_TOKENS:
+            raise ExpressionLimitError(
+                f"expression exceeds the {_MAX_EXPRESSION_TOKENS}-token limit"
+            )
         number = _NUMBER.match(text, index)
         if number:
             result.append(_Token("number", number.group(0), index))
@@ -87,9 +99,10 @@ def _tokens(text: str) -> list[_Token]:
             result.append(_Token("operator", "**", index))
             index += 2
             continue
-        if text[index] in "+-*/^()":
-            kind = "paren" if text[index] in "()" else "operator"
-            result.append(_Token(kind, text[index], index))
+        if text[index] in "+-*/^(){}":
+            kind = "paren" if text[index] in "(){}" else "operator"
+            normalized = {"{": "(", "}": ")"}.get(text[index], text[index])
+            result.append(_Token(kind, normalized, index))
             index += 1
             continue
         raise ExpressionError(f"unsupported character {text[index]!r} at offset {index}")
@@ -98,22 +111,47 @@ def _tokens(text: str) -> list[_Token]:
 
 
 def _number_value(text: str) -> Decimal:
+    if len(text) > _MAX_NUMBER_CHARS:
+        raise ExpressionLimitError(
+            f"number literal exceeds the {_MAX_NUMBER_CHARS}-character limit"
+        )
     match = re.fullmatch(
-        r"((?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)(meg|mil|[tgkmunpf])?",
+        r"((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)(meg|mil|[tgkmunpf])?",
         text,
-        re.IGNORECASE,
+        re.IGNORECASE | re.ASCII,
     )
     if not match:
         raise ExpressionError(f"invalid number {text!r}")
-    value = Decimal(match.group(1))
+    exponent = re.search(r"[eE][+-]?([0-9]+)", match.group(1), re.ASCII)
+    if exponent is not None and (
+        len(exponent.group(1)) > 5 or int(exponent.group(1)) > _MAX_EXPONENT_MAGNITUDE
+    ):
+        raise ExpressionLimitError("number exponent magnitude exceeds 10000")
+    try:
+        value = Decimal(match.group(1))
+    except InvalidOperation as error:
+        raise ExpressionError(f"invalid number {text!r}") from error
     suffix = match.group(2)
-    return value * _SCALES[suffix.casefold()] if suffix else value
+    try:
+        result = value * _SCALES[suffix.casefold()] if suffix else value
+    except InvalidOperation as error:
+        raise ExpressionError(f"invalid number {text!r}") from error
+    if not result.is_finite():
+        raise ExpressionError(f"invalid number {text!r}")
+    return result
 
 
 class _Parser:
     def __init__(self, text: str) -> None:
         self.tokens = _tokens(text)
         self.index = 0
+        self.nodes = 0
+
+    def account_node(self, expression: Expr) -> Expr:
+        self.nodes += 1
+        if self.nodes > _MAX_EXPRESSION_NODES:
+            raise ExpressionLimitError(f"expression exceeds the {_MAX_EXPRESSION_NODES}-node limit")
+        return expression
 
     @property
     def current(self) -> _Token:
@@ -127,23 +165,25 @@ class _Parser:
     def parse(self) -> Expr:
         if self.current.kind == "eof":
             raise ExpressionError("empty expression")
-        expression = self.parse_precedence(0)
+        expression = self.parse_precedence(0, 0)
         if self.current.kind != "eof":
             raise ExpressionError(
                 f"unexpected token {self.current.text!r} at offset {self.current.offset}"
             )
         return expression
 
-    def parse_precedence(self, minimum: int) -> Expr:
+    def parse_precedence(self, minimum: int, depth: int) -> Expr:
+        if depth > _MAX_EXPRESSION_DEPTH:
+            raise ExpressionLimitError(f"expression nesting exceeds {_MAX_EXPRESSION_DEPTH} levels")
         token = self.consume()
         if token.kind == "number":
-            left: Expr = Number(_number_value(token.text), token.text)
+            left: Expr = self.account_node(Number(_number_value(token.text), token.text))
         elif token.kind == "name":
-            left = Name(token.text)
+            left = self.account_node(Name(token.text))
         elif token.text in {"+", "-"}:
-            left = Unary(token.text, self.parse_precedence(30))
+            left = self.account_node(Unary(token.text, self.parse_precedence(30, depth + 1)))
         elif token.text == "(":
-            left = self.parse_precedence(0)
+            left = self.parse_precedence(0, depth + 1)
             if self.current.text != ")":
                 raise ExpressionError("missing closing parenthesis")
             self.consume()
@@ -154,8 +194,11 @@ class _Parser:
         while self.current.text in precedence and precedence[self.current.text] >= minimum:
             operator = self.consume().text
             level = precedence[operator]
-            right = self.parse_precedence(level if operator in {"^", "**"} else level + 1)
-            left = Binary(operator, left, right)
+            right = self.parse_precedence(
+                level if operator in {"^", "**"} else level + 1,
+                depth + 1,
+            )
+            left = self.account_node(Binary(operator, left, right))
         return left
 
 
@@ -223,16 +266,20 @@ def format_decimal(value: Decimal) -> str:
 
 
 def format_expression(expression: Expr) -> str:
-    if isinstance(expression, Number):
-        return expression.original
-    if isinstance(expression, Name):
-        return expression.value
-    if isinstance(expression, Unary):
-        return f"{expression.operator}{format_expression(expression.operand)}"
-    return (
-        "{"
-        + format_expression(expression.left)
-        + f" {expression.operator} "
-        + format_expression(expression.right)
-        + "}"
-    )
+    """Render an expression in linear time without recursive string concatenation."""
+
+    rendered: list[str] = []
+    pending: list[Expr | str] = [expression]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            rendered.append(item)
+        elif isinstance(item, Number):
+            rendered.append(item.original)
+        elif isinstance(item, Name):
+            rendered.append(item.value)
+        elif isinstance(item, Unary):
+            pending.extend((item.operand, item.operator))
+        else:
+            pending.extend(("}", item.right, f" {item.operator} ", item.left, "{"))
+    return "".join(rendered)

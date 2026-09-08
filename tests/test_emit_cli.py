@@ -80,6 +80,45 @@ def test_format_check_and_output(tmp_path, capsys):
     assert main(["format", str(output), "--check"]) == 0
 
 
+def test_file_outputs_are_no_clobber_atomic_and_never_alias_inputs(tmp_path, capsys):
+    source = tmp_path / "deck.sp"
+    original = "R1   a 0 1k\n.end\n"
+    source.write_text(original, encoding="utf-8")
+
+    for force in ([], ["--force"]):
+        assert main(["format", str(source), "-o", str(source), *force]) == 2
+        assert source.read_text(encoding="utf-8") == original
+        assert "aliases an input" in capsys.readouterr().err
+
+    output = tmp_path / "formatted.sp"
+    output.write_text("sentinel", encoding="utf-8")
+    assert main(["format", str(source), "-o", str(output)]) == 2
+    assert output.read_text(encoding="utf-8") == "sentinel"
+    assert "refusing to overwrite" in capsys.readouterr().err
+    assert main(["format", str(source), "-o", str(output), "--force"]) == 0
+    assert output.read_text(encoding="utf-8") == "R1 a 0 1k\n.end\n"
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_flatten_preflights_output_aliases_before_writing(tmp_path, capsys):
+    destination = tmp_path / "same"
+    assert (
+        main(
+            [
+                "flatten",
+                str(FIXTURES / "valid" / "top.sp"),
+                "-o",
+                str(destination),
+                "--provenance",
+                str(destination),
+            ]
+        )
+        == 2
+    )
+    assert not destination.exists()
+    assert "aliases another output" in capsys.readouterr().err
+
+
 def test_io_failure_uses_exit_code_two(capsys):
     assert main(["parse", "does-not-exist.sp"]) == 2
     assert "spice-trellis:" in capsys.readouterr().err

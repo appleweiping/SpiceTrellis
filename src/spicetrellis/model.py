@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True, order=True)
 class SourceSpan:
-    """A one-based source range."""
+    """A one-based, half-open range whose columns count Unicode scalar values."""
 
     filename: str
     start_line: int

@@ -30,6 +30,9 @@ jobs:
           persist-credentials: false
       - name: Verify tag commit is reachable from main
         run: |
+          git config gpg.format ssh
+          git config gpg.ssh.allowedSignersFile "$GITHUB_WORKSPACE/.github/allowed_signers"
+          git verify-tag "$GITHUB_REF_NAME"
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
             echo "release commit is not reachable from origin/main" >&2
@@ -128,12 +131,18 @@ jobs:
               "corpus/portable_analog/rc_sensor_frontend.sp",
               "corpus/portable_analog/two_stage_ota.sp",
               "docs/schemas/structural-summary-v1.schema.json",
+              "docs/schemas/circuit-ir-v1.schema.json",
+              "interop/fixtures/rejection-corpus-v1.json",
           }
           if missing := required_source - names:
               raise SystemExit(f"source distribution is missing: {sorted(missing)}")
           with zipfile.ZipFile(wheels[0]) as archive:
               wheel_names = set(archive.namelist())
-          required_wheel = {"spicetrellis/_version.py", "spicetrellis/py.typed"}
+          required_wheel = {
+              "spicetrellis/_version.py",
+              "spicetrellis/py.typed",
+              "spicetrellis/schemas/circuit-ir-v1.schema.json",
+          }
           if missing := required_wheel - wheel_names:
               raise SystemExit(f"wheel is missing: {sorted(missing)}")
           PY
@@ -143,8 +152,12 @@ jobs:
           .release-smoke/bin/python -m pip install --disable-pip-version-check --no-deps dist/*.whl
           .release-smoke/bin/python -I - <<'PY'
           import importlib.metadata
+          import importlib.resources
+          import json
           import subprocess
           import sys
+          import tempfile
+          from pathlib import Path
 
           import spicetrellis
 
@@ -156,8 +169,42 @@ jobs:
           ).strip()
           if output != f"spice-trellis {installed}":
               raise SystemExit(f"unexpected CLI version: {output!r}")
+          schema = importlib.resources.files("spicetrellis").joinpath(
+              "schemas/circuit-ir-v1.schema.json"
+          ).read_text(encoding="utf-8")
+          if json.loads(schema)["$id"] != "urn:org.spicetrellis:circuit-ir:1":
+              raise SystemExit("installed Circuit IR schema has the wrong identity")
+          with tempfile.TemporaryDirectory() as directory:
+              root = Path(directory)
+              deck = root / "smoke.sp"
+              artifact = root / "smoke.ir.json"
+              deck.write_text("R1 in 0 1k\n.end\n", encoding="utf-8")
+              subprocess.run(
+                  [sys.executable, "-I", "-m", "spicetrellis", "export-ir", str(deck),
+                   "--compact", "-o", str(artifact)],
+                  check=True,
+              )
+              checked = subprocess.check_output(
+                  [sys.executable, "-I", "-m", "spicetrellis", "check-ir", str(artifact)],
+                  text=True,
+              )
+              if json.loads(checked)["instances"] != 1:
+                  raise SystemExit("installed Circuit IR CLI smoke returned the wrong shape")
           PY
-      - name: Upload verified distributions
+      - name: Generate SPDX software bill of materials
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: dist
+          format: spdx-json
+          output-file: dist/SBOM.spdx.json
+          upload-artifact: false
+      - name: Generate and verify release checksums
+        run: |
+          cd dist
+          sha256sum -- ./*.whl ./*.tar.gz ./SBOM.spdx.json > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          python -c 'import json; assert json.load(open("SBOM.spdx.json"))["spdxVersion"] == "SPDX-2.3"'
+      - name: Upload verified distributions and release evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-distributions

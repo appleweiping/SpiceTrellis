@@ -35,6 +35,8 @@ understand a deck before choosing how or where to simulate it.
 - Deterministic flattening with hierarchical element/node names and a source
   map that records both definition sites and instance expansion chains.
 - Stable text and JSON diagnostics suitable for local scripts and CI.
+- Versioned circuit IR with explicit hierarchy, canonical identities, checkout-independent source
+  names, deterministic fingerprints, strict decoding, and declared losses for unsupported cards.
 - No runtime Python dependencies.
 
 Unknown directives and element families are preserved as opaque cards and
@@ -153,15 +155,18 @@ spice-trellis lint examples/hierarchical_filter/broken.sp
 
 ## CLI reference
 
-The command line exposes six subcommands, each taking exactly one input path as
+The command line exposes nine subcommands, each taking exactly one input path as
 its only positional argument:
 
 - `parse`: syntax JSON for a single file.
 - `lint`: include-following analysis and diagnostics.
 - `flatten`: deterministic hierarchy expansion.
+- `locate`: bidirectional queries over flattening provenance.
 - `format`: canonical rendering of a single file.
 - `inventory`: structural summary of an analyzed project.
 - `fuzz-smoke`: bounded deterministic parser mutation counters.
+- `export-ir`: versioned language-neutral circuit hierarchy.
+- `check-ir`: strict validation and identity report for saved circuit IR.
 
 `parse`, `lint`, `inventory`, and `fuzz-smoke` always write to standard output.
 `flatten` and `format` write to standard output unless `-o`/`--output` names a
@@ -178,7 +183,7 @@ spice-trellis --version
 ```
 
 ```text
-spice-trellis 0.3.0
+spice-trellis 0.4.0
 ```
 
 ### Parse one file
@@ -279,6 +284,38 @@ reported as counters. `--cases` defaults to 128 and must be between 1 and 10000;
 same counters. This is a parser robustness check, not exhaustive fuzzing and not
 electrical validation.
 
+## Versioned circuit IR
+
+The syntax tree is intentionally close to parser internals. Tools that need a stable, independent
+boundary can instead consume Circuit IR version 1:
+
+```bash
+spice-trellis export-ir circuit.sp --include-root project -o build/circuit.ir.json
+spice-trellis check-ir build/circuit.ir.json
+```
+
+Output paths are no-clobber by default; use `--force` only for an intentional replacement. An
+output is never allowed to alias the entry deck or an analyzed include.
+
+The artifact has an explicit `$top` module, subcircuit modules, scoped model and instance IDs,
+canonical parameter expressions, source ranges, and a SHA-256 fingerprint over canonical JSON.
+Absolute checkout paths are removed: project files are relative POSIX paths and explicitly allowed
+external includes are content-addressed. Moving the same inputs to another machine therefore does
+not change the artifact.
+
+Unsupported cards are not discarded. Each becomes a `losses` record with its scope, text, reason,
+and source range. Add `--require-lossless` when any such record must fail CI. `check-ir` rejects
+unknown fields, duplicate JSON keys, non-finite values, non-canonical identities, ambiguous scopes,
+path traversal, malformed expressions, and oversized inputs; it does not trust an artifact merely
+because it is JSON.
+
+The normative Draft 2020-12 schema is
+[`docs/schemas/circuit-ir-v1.schema.json`](docs/schemas/circuit-ir-v1.schema.json), and
+[`docs/circuit-ir.md`](docs/circuit-ir.md) specifies identities, source naming, resource limits, and
+compatibility policy. A zero-dependency [Go consumer and checker](interop/go/README.md) independently
+implements the contract; its shared fixture and rejection corpus must agree in both languages, and
+CI runs the complete Python-producer-to-Go-consumer path.
+
 
 ## Library sections and corners
 
@@ -333,7 +370,7 @@ section call counts against the same nesting limit.
 ## Python API
 
 ```python
-from spicetrellis import analyze_file, flatten, format_deck, inventory, parse_text
+from spicetrellis import analyze_file, build_ir, flatten, format_deck, inventory, parse_text
 
 syntax = parse_text("R1 input 0 10k\n.end\n", filename="memory.sp")
 
@@ -342,6 +379,7 @@ if not analysis.has_errors:
     flat = flatten(analysis)
     print(format_deck(flat.statements))
     print(inventory(analysis).as_dict())
+    print(build_ir(analysis).fingerprint)
 ```
 
 Input problems are represented by immutable diagnostics. Each diagnostic has a
@@ -396,8 +434,7 @@ memory limits. See [SECURITY.md](SECURITY.md) for responsible reporting.
 Current 0.x releases intentionally do not implement:
 
 - numeric simulation or performance prediction;
-- `.lib` section selection, `.control` execution, behavioral expressions, or
-  Verilog-A;
+- `.control` execution, behavioral expressions, or Verilog-A;
 - full vendor-specific SPICE dialects;
 - PDK model semantics or model-file licensing decisions;
 - automatic correction of a user's circuit;

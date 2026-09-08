@@ -101,7 +101,7 @@ def test_benchmark_binds_tool_version_and_source_tree() -> None:
     module = runpy.run_path(str(ROOT / "benchmarks" / "benchmark.py"))
     result = module["run"](1)
     manifest = json.loads((ROOT / "benchmarks" / "manifest.json").read_text(encoding="utf-8"))
-    assert result["schema_version"] == 2
+    assert result["schema_version"] == 3
     assert result["tool"]["version"] == __version__
     source_digest = sha256()
     package_root = Path(installed_package.__file__).resolve().parent
@@ -132,6 +132,18 @@ def test_benchmark_binds_tool_version_and_source_tree() -> None:
     assert result["workload_sha256"] == manifest["workload_sha256"]
     for name, value in manifest["expected"].items():
         assert result[name] == value
+    scale = result["circuit_ir_scale"]
+    expected_scale = manifest["circuit_ir_scale"]
+    assert scale["instances"] == expected_scale["instances"]
+    assert scale["serialized_bytes"] == expected_scale["serialized_bytes"]
+    assert scale["workload_sha256"] == expected_scale["workload_sha256"]
+    assert scale["median_ms"] <= expected_scale["maximum_median_ms"]
     for invalid in (True, 1.5, 0, 10_001):
         with pytest.raises(ValueError, match="integer between"):
             module["run"](invalid)
+    for invalid in (True, 0, 20_001):
+        with pytest.raises(ValueError, match="ir_instances"):
+            module["run"](1, ir_instances=invalid)
+    for invalid in (True, 0, 101):
+        with pytest.raises(ValueError, match="ir_iterations"):
+            module["run"](1, ir_iterations=invalid)

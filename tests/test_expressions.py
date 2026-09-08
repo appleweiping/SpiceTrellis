@@ -61,8 +61,38 @@ def test_exponent_magnitude_is_bounded():
         evaluate_expression(parse_expression("2^10001"), {})
 
 
+def test_expression_nesting_is_bounded_deterministically():
+    source = "(" * 258 + "1" + ")" * 258
+    with pytest.raises(ExpressionError, match="nesting exceeds 256 levels"):
+        parse_expression(source)
+
+
+def test_expression_ast_size_is_bounded_independently_of_nesting():
+    source = "+".join(["1"] * 257)
+    with pytest.raises(ExpressionError, match="512-node limit"):
+        parse_expression(source)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "\u0661",
+        "\uff11",
+        "1\u00a0+ 2",
+        "1\u212a",
+        "1e9999999999999999999",
+        "1" * 129,
+    ],
+)
+def test_expression_wire_subset_rejects_cross_language_ambiguity(source: str) -> None:
+    with pytest.raises(ExpressionError):
+        parse_expression(source)
+
+
 def test_formatters_are_deterministic():
     expression = parse_expression("{left+2*right}")
-    assert format_expression(expression) == "{left + {2 * right}}"
+    rendered = format_expression(expression)
+    assert rendered == "{left + {2 * right}}"
+    assert parse_expression(rendered) == expression
     assert format_decimal(Decimal("1.2300")) == "1.23"
     assert format_decimal(Decimal("0")) == "0"
