@@ -1,0 +1,61 @@
+{
+  "schema": "org.spicetrellis.circuit-ir-rejection-corpus",
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "dot dependency path",
+      "old": "\"dependencies\": [\n    \"minimal.sp\"\n  ]",
+      "new": "\"dependencies\": [\n    \".\"\n  ]"
+    },
+    {
+      "name": "case-insensitive dependency alias",
+      "old": "\"dependencies\": [\n    \"minimal.sp\"\n  ]",
+      "new": "\"dependencies\": [\n    \"minimal.sp\",\n    \"MINIMAL.SP\"\n  ]"
+    },
+    {
+      "name": "coordinate beyond cross-language maximum",
+      "old": "\"start\": [\n              1,\n              1\n            ]",
+      "new": "\"start\": [\n              2147483648,\n              1\n            ]"
+    },
+    {
+      "name": "Arabic-Indic numeric atom",
+      "old": "\"value\": \"1k\"",
+      "new": "\"value\": \"١\""
+    },
+    {
+      "name": "non-ASCII expression whitespace",
+      "old": "\"value\": \"1k\"",
+      "new": "\"value\": \"1 + 2\""
+    },
+    {
+      "name": "Unicode Kelvin suffix",
+      "old": "\"value\": \"1k\"",
+      "new": "\"value\": \"1K\""
+    },
+    {
+      "name": "oversized exponent",
+      "old": "\"value\": \"1k\"",
+      "new": "\"value\": \"1e9999999999999999999\""
+    },
+    {
+      "name": "expression beyond shared token budget",
+      "old": "\"value\": \"1k\"",
+      "new": "\"value\": \"1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1\""
+    },
+    {
+      "name": "escaped lone surrogate",
+      "old": "\"value\": \"1k\"",
+      "new": "\"value\": \"\\ud800\""
+    },
+    {
+      "name": "replacement character",
+      "old": "\"value\": \"1k\"",
+      "new": "\"value\": \"�\""
+    },
+    {
+      "name": "non-ASCII dependency path",
+      "old": "\"dependencies\": [\n    \"minimal.sp\"\n  ]",
+      "new": "\"dependencies\": [\n    \"mïnimal.sp\"\n  ]"
+    }
+  ]
+}

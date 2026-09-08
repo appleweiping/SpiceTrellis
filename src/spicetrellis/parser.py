@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from spicetrellis.expressions import ExpressionError, parse_expression
+from spicetrellis.expressions import ExpressionError, ExpressionLimitError, parse_expression
 from spicetrellis.model import (
     Assignment,
     Blank,
@@ -294,8 +294,11 @@ def parse_text(text: str, filename: str = "<memory>") -> SyntaxDeck:
                     Diagnostic("ST1101", "warning", statement.reason, statement.meta.span)
                 )
         except CardParseError as error:
-            diagnostics.append(Diagnostic("ST1002", "error", str(error), card.span))
-            statements.append(Opaque(card.code, str(error), _meta(card)))
+            is_limit = isinstance(error.__cause__, ExpressionLimitError)
+            code = "ST1004" if is_limit else "ST1002"
+            reason = str(error)
+            diagnostics.append(Diagnostic(code, "error", reason, card.span))
+            statements.append(Opaque(card.code, reason, _meta(card)))
         except RecursionError:
             reason = "statement exceeds the parser nesting limit"
             diagnostics.append(Diagnostic("ST1004", "error", reason, card.span))

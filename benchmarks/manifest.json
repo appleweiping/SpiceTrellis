@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "corpus": {
     "name": "portable_analog",
     "provenance": "Clean-room original examples authored for this repository; no PDK, vendor model, textbook listing, or third-party netlist was copied.",
@@ -11,11 +11,18 @@
     ]
   },
   "runtime": {
-    "distribution_version": "0.3.0",
-    "source_sha256": "eeffc2196c7310673ff9004c7c314d917e79adc9bc9352dc9a6aec6d634aa336"
+    "distribution_version": "0.4.0",
+    "source_sha256": "7047d05f298e44db04c92731af8a42ddcf46a5e6d68060ce06a40c60472a4407"
   },
-  "command": "python benchmarks/benchmark.py --iterations 25",
+  "command": "python benchmarks/benchmark.py --iterations 25 --ir-instances 5000 --ir-iterations 1",
   "expected": {"decks_per_iteration": 2, "elements_per_iteration": 23},
   "workload_sha256": "9e161d08fd8de807afd900119d972352cfd2f193d985942272b5e81973e75af8",
+  "circuit_ir_scale": {
+    "provenance": "Deterministically generated clean-room resistor deck; generator is benchmark.py and is source-hash bound.",
+    "instances": 5000,
+    "serialized_bytes": 1009700,
+    "workload_sha256": "d2cc341aec7c3474aef3b26e20f8abd0002392d8793243b7718a888156c2e814",
+    "maximum_median_ms": 15000
+  },
   "timing_policy": "Informational only; compare on the same host, interpreter, and power mode."
 }

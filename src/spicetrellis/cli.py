@@ -6,17 +6,22 @@ import argparse
 import sys
 from pathlib import Path
 
+from spicetrellis._output import validate_output_paths, write_text_atomic
 from spicetrellis._version import __version__
 from spicetrellis.api import (
     analyze_file,
+    build_ir,
+    dump_ir,
     flatten,
     format_deck,
     fuzz_smoke,
     inventory,
+    load_ir,
     parse_text,
     structural_summary,
 )
 from spicetrellis.emit import format_diagnostics, to_json
+from spicetrellis.model import Analysis
 from spicetrellis.provenance import Origin, build_index
 from spicetrellis.semantics import DEFAULT_ANALYSIS_LIMITS
 
@@ -34,13 +39,28 @@ def _read(path: Path) -> str:
     return content.decode("utf-8-sig")
 
 
-def _write_or_print(text: str, destination: str | None) -> None:
+def _write_or_print(
+    text: str,
+    destination: str | None,
+    *,
+    force: bool = False,
+    protected: tuple[Path, ...] = (),
+    prevalidated: bool = False,
+) -> None:
     if destination:
-        path = Path(destination)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8", newline="\n")
+        write_text_atomic(
+            destination,
+            text,
+            force=force,
+            protected=protected,
+            prevalidated=prevalidated,
+        )
     else:
         sys.stdout.write(text)
+
+
+def _analysis_inputs(result: Analysis) -> tuple[Path, ...]:
+    return tuple(path for path, _content in result.source_files)
 
 
 def _command_parse(args: argparse.Namespace) -> int:
@@ -66,11 +86,24 @@ def _command_flatten(args: argparse.Namespace) -> int:
     if flattened.has_errors:
         sys.stderr.write(format_diagnostics(flattened.diagnostics))
         return 1
-    _write_or_print(format_deck(flattened.statements), args.output)
+    protected = _analysis_inputs(result)
+    outputs = tuple(Path(item) for item in (args.output, args.provenance) if item)
+    validate_output_paths(outputs, protected=protected, force=args.force)
+    _write_or_print(
+        format_deck(flattened.statements),
+        args.output,
+        force=args.force,
+        protected=protected,
+        prevalidated=True,
+    )
     if args.provenance:
-        provenance_path = Path(args.provenance)
-        provenance_path.parent.mkdir(parents=True, exist_ok=True)
-        provenance_path.write_text(to_json(flattened.provenance), encoding="utf-8", newline="\n")
+        write_text_atomic(
+            args.provenance,
+            to_json(flattened.provenance),
+            force=args.force,
+            protected=protected,
+            prevalidated=True,
+        )
     return 0
 
 
@@ -93,7 +126,12 @@ def _command_locate(args: argparse.Namespace) -> int:
         resolved = str(Path(filename).resolve())
         use = index.by_source(resolved, int(raw_line))
         if args.json:
-            _write_or_print(to_json(use.as_dict()), args.output)
+            _write_or_print(
+                to_json(use.as_dict()),
+                args.output,
+                force=args.force,
+                protected=_analysis_inputs(result),
+            )
             return 0
         # No card is a real answer, not a failure: a line inside a subcircuit
         # nothing instantiates produces nothing, and that is worth seeing.
@@ -109,7 +147,12 @@ def _command_locate(args: argparse.Namespace) -> int:
         path = tuple(part for part in args.under.split("/") if part)
         found = index.under(path)
         if args.json:
-            _write_or_print(to_json([item.as_dict() for item in found]), args.output)
+            _write_or_print(
+                to_json([item.as_dict() for item in found]),
+                args.output,
+                force=args.force,
+                protected=_analysis_inputs(result),
+            )
             return 0
         print(f"{args.under} expanded to {len(found)} card(s):")
         for produced in found:
@@ -121,7 +164,12 @@ def _command_locate(args: argparse.Namespace) -> int:
         sys.stderr.write(f"no flattened card named or numbered {args.card!r}\n")
         return 1
     if args.json:
-        _write_or_print(to_json(origin.as_dict()), args.output)
+        _write_or_print(
+            to_json(origin.as_dict()),
+            args.output,
+            force=args.force,
+            protected=_analysis_inputs(result),
+        )
         return 0
     print(origin.describe())
     return 0
@@ -137,7 +185,12 @@ def _command_format(args: argparse.Namespace) -> int:
     rendered = format_deck(deck)
     if args.check:
         return 0 if original.replace("\r\n", "\n") == rendered else 1
-    _write_or_print(rendered, args.output)
+    _write_or_print(
+        rendered,
+        args.output,
+        force=args.force,
+        protected=(path,),
+    )
     return 0
 
 
@@ -155,6 +208,42 @@ def _command_fuzz(args: argparse.Namespace) -> int:
     stats = fuzz_smoke(_read(Path(args.path)), cases=args.cases, seed=args.seed)
     sys.stdout.write(to_json(stats.as_dict()))
     return 0
+
+
+def _command_export_ir(args: argparse.Namespace) -> int:
+    result = analyze_file(args.path, include_roots=_roots(args))
+    if result.has_errors:
+        sys.stderr.write(format_diagnostics(result.diagnostics))
+        return 1
+    circuit = build_ir(result)
+    if args.require_lossless and circuit.losses:
+        sys.stderr.write(
+            f"circuit IR would contain {len(circuit.losses)} declared loss(es); "
+            "remove --require-lossless to preserve them in the artifact\n"
+        )
+        return 1
+    _write_or_print(
+        dump_ir(circuit, pretty=not args.compact),
+        args.output,
+        force=args.force,
+        protected=_analysis_inputs(result),
+    )
+    return 0
+
+
+def _command_check_ir(args: argparse.Namespace) -> int:
+    circuit = load_ir(args.path)
+    result = {
+        "schema": circuit.schema,
+        "schema_version": circuit.schema_version,
+        "fingerprint": circuit.fingerprint,
+        "modules": len(circuit.modules),
+        "instances": circuit.instance_count,
+        "models": len(circuit.models),
+        "losses": len(circuit.losses),
+    }
+    sys.stdout.write(to_json(result))
+    return 1 if args.require_lossless and circuit.losses else 0
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -176,6 +265,7 @@ def _parser() -> argparse.ArgumentParser:
     flatten_command.add_argument("path")
     flatten_command.add_argument("-o", "--output")
     flatten_command.add_argument("--provenance")
+    flatten_command.add_argument("--force", action="store_true")
     flatten_command.add_argument("--include-root", action="append", default=[])
     flatten_command.set_defaults(handler=_command_flatten)
 
@@ -195,12 +285,14 @@ def _parser() -> argparse.ArgumentParser:
     locate.add_argument("--include-root", action="append", default=[])
     locate.add_argument("--json", action="store_true")
     locate.add_argument("-o", "--output")
+    locate.add_argument("--force", action="store_true")
     locate.set_defaults(handler=_command_locate)
 
     formatter = subparsers.add_parser("format", help="render a canonical portable-SPICE deck")
     formatter.add_argument("path")
     formatter.add_argument("--check", action="store_true")
     formatter.add_argument("-o", "--output")
+    formatter.add_argument("--force", action="store_true")
     formatter.set_defaults(handler=_command_format)
 
     inventory_command = subparsers.add_parser("inventory", help="summarize circuit contents")
@@ -215,6 +307,24 @@ def _parser() -> argparse.ArgumentParser:
     fuzz.add_argument("--cases", type=int, default=128)
     fuzz.add_argument("--seed", type=int, default=0)
     fuzz.set_defaults(handler=_command_fuzz)
+
+    export_ir = subparsers.add_parser(
+        "export-ir", help="analyze a project and emit versioned circuit IR"
+    )
+    export_ir.add_argument("path")
+    export_ir.add_argument("-o", "--output")
+    export_ir.add_argument("--force", action="store_true")
+    export_ir.add_argument("--include-root", action="append", default=[])
+    export_ir.add_argument("--compact", action="store_true")
+    export_ir.add_argument("--require-lossless", action="store_true")
+    export_ir.set_defaults(handler=_command_export_ir)
+
+    check_ir = subparsers.add_parser(
+        "check-ir", help="strictly validate circuit IR and report its identity"
+    )
+    check_ir.add_argument("path")
+    check_ir.add_argument("--require-lossless", action="store_true")
+    check_ir.set_defaults(handler=_command_check_ir)
     return parser
 
 

@@ -1,0 +1,45 @@
+{
+  "dependencies": [
+    "minimal.sp"
+  ],
+  "entry": "minimal.sp",
+  "global_nodes": [],
+  "losses": [],
+  "models": [],
+  "modules": [
+    {
+      "instances": [
+        {
+          "connections": [
+            "in",
+            "0"
+          ],
+          "family": "R",
+          "id": "$top::r1",
+          "model": null,
+          "name": "R1",
+          "parameters": [],
+          "source": {
+            "end": [
+              1,
+              11
+            ],
+            "file": "minimal.sp",
+            "start": [
+              1,
+              1
+            ]
+          },
+          "source_form": null,
+          "value": "1k"
+        }
+      ],
+      "name": "$top",
+      "parameters": [],
+      "ports": [],
+      "source": null
+    }
+  ],
+  "schema": "org.spicetrellis.circuit-ir",
+  "schema_version": 1
+}

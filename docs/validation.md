@@ -17,6 +17,12 @@ The portable Draft 2020-12 contract is published at
 producer additionally enforces case-insensitive path uniqueness and equality between the file
 record count and the reported structural count.
 
+`spice-trellis export-ir` emits `org.spicetrellis.circuit-ir` only after an error-free analysis.
+Its separate schema is `docs/schemas/circuit-ir-v1.schema.json`; `check-ir` adds strict semantic
+validation for canonical identities, normalized relative paths, expression spelling, cross-scope
+references, and uniqueness. Unsupported cards are explicit `losses`, and `--require-lossless`
+turns their presence into a failed gate. See [`circuit-ir.md`](circuit-ir.md) for the full contract.
+
 File-backed analysis is bounded by `AnalysisLimits`: 2 MiB per unique file, 10 MiB total, 256
 unique files, 64 include levels, and 250,000 expanded statements by default. Reads stop at the
 configured boundary before parsing, repeated failed paths are not reopened, and limit violations

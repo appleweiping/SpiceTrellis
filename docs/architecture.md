@@ -27,7 +27,7 @@ include loader --> confined, ordered project stream
     v
 semantic builder --> symbols, parameter graph, call graph
     |
-    +--> inventory
+    +--> inventory / versioned circuit IR
     |
     v
 elaborator --> primitive cards + provenance records
@@ -117,9 +117,11 @@ iteration.
 ## Public boundaries
 
 `spicetrellis.api` exports parsing, analysis, elaboration, formatting, inventory, deterministic
-mutation smoke testing, and structural-summary operations. The structural summary is emitted only
-after error-free semantic analysis and contains shared observations plus content digests; it does
-not grant trust to downstream consumers.
+mutation smoke testing, structural-summary operations, and the versioned circuit IR. The structural
+summary is emitted only after error-free semantic analysis and contains shared observations plus
+content digests; it does not grant trust to downstream consumers. Circuit IR is a stricter
+language-neutral boundary with explicit hierarchy and declared conversion losses; its complete
+contract is documented in [`circuit-ir.md`](circuit-ir.md).
 
 - `parse_text`
 - `analyze_file`
@@ -128,6 +130,9 @@ not grant trust to downstream consumers.
 - `inventory`
 - `fuzz_smoke`
 - `structural_summary`
+- `build_ir`, `dump_ir`, `load_ir`, `load_ir_text`, `write_ir`
 
-The CLI is a thin adapter over these functions. It owns file-output decisions
-and process exit codes; library functions do not terminate the process.
+The CLI is a thin adapter over these functions. It owns process exit codes and protects analyzed
+input paths from output aliases. The `write_ir` library boundary shares the atomic no-clobber
+writer and exposes replacement only through `force=True`; library functions never terminate the
+process.

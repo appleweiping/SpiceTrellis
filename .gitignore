@@ -25,3 +25,7 @@ Thumbs.db
 .tox/
 .nox/
 coverage.xml
+coverage.out
+coverage_cov
+$coverPath
+/interop/go/coverage

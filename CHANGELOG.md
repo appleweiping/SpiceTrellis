@@ -5,6 +5,50 @@ follows Keep a Changelog, and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-07
+
+### Added
+
+- Version 1 of `org.spicetrellis.circuit-ir`, an immutable language-neutral hierarchy with scoped,
+  canonical instance and model identities, normalized source locations, canonical expressions,
+  deterministic fingerprints, and explicit records for every unsupported card.
+- `export-ir` and `check-ir` CLI commands, including a `--require-lossless` policy gate and compact
+  deterministic serialization.
+- A public Draft 2020-12 schema and a strict independent decoder with duplicate-key, non-finite
+  number, malformed identity, ambiguous scope, non-portable path, resource-limit, and deep-input
+  rejection.
+- Checkout-independent naming for both project files and content-addressed external includes.
+- A zero-dependency Go 1.23 consumer and checker with independent canonical-expression parsing,
+  model/subcircuit reference closure, cross-language fingerprint fixture, race tests, vet, and an
+  enforced 90% statement-coverage floor across Linux, Windows, and macOS CI.
+- A shared adversarial rejection corpus and an end-to-end CI gate that produces an artifact with
+  Python and independently consumes and fingerprints it with Go. The normative schema is shipped
+  in both source and wheel distributions.
+- A deterministic 5,000-instance Circuit IR build/serialization benchmark with source, workload,
+  artifact-size, and performance-budget evidence.
+- DCO verification for every pull-request commit, cryptographic release-tag verification, and a
+  signed nested-module tag workflow for independently consumable Go versions.
+
+### Fixed
+
+- Canonical nested binary expressions can be parsed again, so formatting an expression and then
+  decoding it is a true round trip rather than failing on the formatter's nested braces.
+- Python and Go now share the same acceptance boundary for ASCII number atoms, exponent and source
+  coordinates, Unicode scalar values, printable source paths, case-insensitive path aliases, and
+  bounded expression token/node/depth budgets.
+- Source ranges are explicitly one-based and half-open with Unicode-scalar columns; expression
+  limit diagnostics retain their actual cause instead of misreporting every limit as nesting.
+- Circuit IR source aliases are resolved once rather than once per record, validated immutable IR
+  reuses its validation result, and canonical rendering avoids recursive string concatenation.
+- Go duplicate-key scanning no longer accumulates attacker-controlled diagnostic paths, preventing
+  deep long-key JSON from amplifying a bounded input into quadratic retained memory.
+- Go coverage enforcement uses the profile's raw statement counts instead of accepting a
+  one-decimal percentage rounded up by `go tool cover`.
+- File loading stops at the IR byte boundary, and all file-producing CLI commands now use atomic
+  no-clobber output with explicit `--force` while permanently protecting their input files.
+- Release assets include a pinned-tool SPDX 2.3 SBOM and verified SHA-256 checksums alongside
+  GitHub build provenance attestations.
+
 ## [0.3.0] - 2026-09-07
 
 ### Added

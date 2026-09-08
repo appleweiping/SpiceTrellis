@@ -1,0 +1,67 @@
+name: Go module release verification
+
+on:
+  push:
+    tags:
+      - "interop/go/v*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: interop/go
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Verify signed tag, main ancestry, and matching project version
+        working-directory: .
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          git config gpg.format ssh
+          git config gpg.ssh.allowedSignersFile "$GITHUB_WORKSPACE/.github/allowed_signers"
+          git verify-tag "$RELEASE_TAG"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "Go module tag is not reachable from origin/main" >&2
+            exit 1
+          }
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          expected = f"interop/go/v{version}"
+          if os.environ["RELEASE_TAG"] != expected:
+              raise SystemExit(f"Go module tag must be {expected!r}")
+          PY
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: interop/go/go.mod
+          cache: false
+      - run: go test -race ./...
+      - run: go vet ./...
+      - name: Enforce Go coverage floor
+        shell: bash
+        run: |
+          go test -coverprofile="$RUNNER_TEMP/circuit-ir.coverage" ./...
+          read -r covered total < <(
+            awk 'NR > 1 { total += $2; if ($3 > 0) covered += $2 }
+                 END { print covered + 0, total + 0 }' "$RUNNER_TEMP/circuit-ir.coverage"
+          )
+          echo "Go statement coverage: $covered/$total"
+          awk -v covered="$covered" -v total="$total" \
+            'BEGIN { if (total == 0 || covered * 100 < total * 90) exit 1 }'
