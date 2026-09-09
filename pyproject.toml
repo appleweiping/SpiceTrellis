@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spicetrellis"
-version = "0.4.0"
+version = "0.5.0"
 description = "A provenance-preserving front end for hierarchical SPICE decks"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -54,6 +54,8 @@ packages = ["src/spicetrellis"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+  "/.github/workflows",
+  "/.github/allowed_signers",
   "/src",
   "/tests",
   "/examples",
@@ -65,8 +67,8 @@ include = [
   "/*.md",
   "/CITATION.cff",
   "/LICENSE",
+  "/uv.lock",
 ]
-exclude = ["/.github", "/uv.lock"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers"

@@ -5,6 +5,8 @@ follows Keep a Changelog, and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-08
+
 ### Added
 
 - Process-independent simulator result values with exact source digests, real/complex
@@ -20,6 +22,12 @@ follows Keep a Changelog, and versions follow Semantic Versioning.
   resource limits and memory-amplification regressions. Original real-simulator oracle
   harnesses exercise ngspice OP/DC/AC/transient ASCII/binary artifacts and Xyce DC,
   complex AC projections and finite-rise transient CSV data with JSON round trips.
+
+### Security
+
+- Release workflows now bind signed annotated tags to GitHub-verified commits on protected
+  `main`, require the exact successful main-push CI run, re-test the frozen source archive,
+  and bind file-level SPDX evidence to the installed wheel before publication.
 
 ## [0.4.0] - 2026-09-07
 
