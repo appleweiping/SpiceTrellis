@@ -13,10 +13,14 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  RELEASE_PROJECT_NAME: spicetrellis
+  RELEASE_PROJECT_VERSION: "0.5.0"
+  RELEASE_SYFT_VERSION: "1.51.1"
+
 jobs:
   verify-ci:
-    name: Require main ancestry and successful CI
-    if: github.event_name == 'push'
+    name: Require exact signed and tested main commit
     runs-on: ubuntu-latest
     timeout-minutes: 35
     permissions:
@@ -27,57 +31,85 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
-      - name: Verify tag commit is reachable from main
+      - name: Verify annotated tag and source commit trust
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          git config gpg.format ssh
-          git config gpg.ssh.allowedSignersFile "$GITHUB_WORKSPACE/.github/allowed_signers"
-          git verify-tag "$GITHUB_REF_NAME"
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/tags/v*) ;;
+            *) echo "release workflow must run from a version tag, not $GITHUB_REF" >&2; exit 1 ;;
+          esac
           git fetch --no-tags origin main
+          test "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" = tag
+          git show origin/main:.github/allowed_signers > "$RUNNER_TEMP/allowed_signers"
+          git config gpg.format ssh
+          git config gpg.ssh.allowedSignersFile "$RUNNER_TEMP/allowed_signers"
+          git verify-tag "$GITHUB_REF_NAME"
+          resolved="$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{}")"
+          if [ "$resolved" != "$GITHUB_SHA" ]; then
+            echo "tag target differs from the workflow commit" >&2
+            exit 1
+          fi
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
             echo "release commit is not reachable from origin/main" >&2
             exit 1
           }
-      - name: Wait for the complete CI workflow on this commit
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" \
+            --jq .commit.verification.verified)" = true || {
+            echo "release commit does not have a GitHub-verified signature" >&2
+            exit 1
+          }
+      - name: Wait for the exact complete main-push CI
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           for attempt in $(seq 1 90); do
-            successful="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=100" --jq '[.workflow_runs[] | select(.conclusion == "success")] | length')"
+            successful="$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=100" \
+              --jq "[.workflow_runs[] | select(.conclusion == \"success\" and .event == \"push\" and .head_branch == \"main\" and .head_sha == \"$GITHUB_SHA\")] | length")"
             if [ "$successful" -gt 0 ]; then
-              echo "verified successful CI workflow for $GITHUB_SHA"
+              echo "verified successful main-push CI workflow for $GITHUB_SHA"
               exit 0
             fi
             echo "CI has not succeeded yet (attempt $attempt/90)"
             sleep 20
           done
-          echo "no successful complete CI workflow found for $GITHUB_SHA" >&2
+          echo "no successful complete main-push CI workflow found for $GITHUB_SHA" >&2
           exit 1
 
   build:
     name: Build and verify distributions
     needs: verify-ci
-    if: >-
-      ${{ always() && (github.event_name == 'workflow_dispatch' ||
-      needs.verify-ci.result == 'success') }}
+    if: needs.verify-ci.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
-      - name: Check out source
+      - name: Check out immutable release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Set up Python
+      - name: Set up exact Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.11"
-          cache: pip
-      - name: Install pinned uv and frozen development environment
-        run: |
-          python -m pip install --disable-pip-version-check uv==0.11.21
-          uv sync --frozen --extra dev
+          python-version: "3.11.16"
+      - name: Set up checksum-verified uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.21"
+          checksum: 8c88519b0ef0af9801fcdee419bbb12116bd9e6b18e162ae093c932d8b264050
+          enable-cache: false
+          download-from-astral-mirror: false
+      - name: Install frozen development environment
+        run: uv sync --frozen --extra dev
       - name: Run release quality gate
         run: |
           uv run --frozen ruff check .
@@ -87,21 +119,24 @@ jobs:
           uv run --frozen pytest --cov=spicetrellis --cov-branch --cov-report=term-missing
       - name: Verify tag matches package version
         env:
-          RELEASE_EVENT: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          python - <<'PY'
+          python -I - <<'PY'
           import os
           import tomllib
           from pathlib import Path
 
           version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-          if os.environ["RELEASE_EVENT"] == "push":
-              expected = f"v{version}"
-              if os.environ["RELEASE_TAG"] != expected:
-                  raise SystemExit(
-                      f"release tag {os.environ['RELEASE_TAG']!r} does not match {expected!r}"
-                  )
+          expected_version = os.environ["RELEASE_PROJECT_VERSION"]
+          if version != expected_version:
+              raise SystemExit(
+                  f"project version {version!r} does not match workflow version {expected_version!r}"
+              )
+          expected = f"v{version}"
+          if os.environ["RELEASE_TAG"] != expected:
+              raise SystemExit(
+                  f"release tag {os.environ['RELEASE_TAG']!r} does not match {expected!r}"
+              )
           print(f"validated project version {version}")
           PY
       - name: Fix build timestamp to the source commit
@@ -113,102 +148,237 @@ jobs:
       - name: Validate distribution metadata and shape
         run: |
           uv run --frozen python -m twine check --strict dist/*
-          python - <<'PY'
+          uv run --frozen python -I - <<'PY'
+          import os
           import tarfile
           import zipfile
           from pathlib import Path
+
+          from spicetrellis.distribution_audit import audit_sdist, audit_wheel
 
           wheels = tuple(Path("dist").glob("*.whl"))
           sdists = tuple(Path("dist").glob("*.tar.gz"))
           if len(wheels) != 1 or len(sdists) != 1 or len(tuple(Path("dist").iterdir())) != 2:
               raise SystemExit("expected exactly one wheel and one .tar.gz source distribution")
           with tarfile.open(sdists[0], "r:gz") as archive:
-              names = {"/".join(name.split("/")[1:]) for name in archive.getnames()}
+              source_names = audit_sdist(
+                  archive,
+                  expected_root=f"spicetrellis-{os.environ['RELEASE_PROJECT_VERSION']}",
+              )
           required_source = {
+              ".github/allowed_signers",
+              ".github/workflows/ci.yml",
+              ".github/workflows/codeql.yml",
+              ".github/workflows/dco.yml",
+              ".github/workflows/go-module-release.yml",
+              ".github/workflows/release.yml",
               "CITATION.cff",
+              "benchmarks/benchmark.py",
               "benchmarks/manifest.json",
-              "corpus/portable_analog/primitives.lib",
-              "corpus/portable_analog/rc_sensor_frontend.sp",
-              "corpus/portable_analog/two_stage_ota.sp",
-              "docs/schemas/structural-summary-v1.schema.json",
               "docs/schemas/circuit-ir-v1.schema.json",
-              "interop/fixtures/rejection-corpus-v1.json",
+              "docs/schemas/simulation-result-v1.schema.json",
+              "docs/schemas/structural-summary-v1.schema.json",
+              "interop/go/README.md",
+              "interop/go/circuitir/decode.go",
+              "interop/go/go.mod",
+              "src/spicetrellis/dco.py",
+              "src/spicetrellis/distribution_audit.py",
+              "src/spicetrellis/raw_results.py",
+              "src/spicetrellis/release_artifacts.py",
+              "src/spicetrellis/result_json.py",
+              "src/spicetrellis/simulation_results.py",
+              "src/spicetrellis/xyce_results.py",
+              "tests/test_dco.py",
+              "tests/test_distribution_audit.py",
+              "tests/test_raw_results.py",
+              "tests/test_release_artifacts.py",
+              "tests/test_release_workflow.py",
+              "tests/test_result_cli.py",
+              "tests/test_result_json.py",
+              "tests/test_simulator_oracles.py",
+              "tests/test_standalone_workflows.py",
+              "tests/test_workflow_security.py",
+              "tests/test_xyce_results.py",
+              "tools/check_ngspice_results.py",
+              "tools/check_xyce_results.py",
+              "uv.lock",
           }
-          if missing := required_source - names:
+          if missing := required_source - source_names:
               raise SystemExit(f"source distribution is missing: {sorted(missing)}")
           with zipfile.ZipFile(wheels[0]) as archive:
-              wheel_names = set(archive.namelist())
+              wheel_names = audit_wheel(archive)
           required_wheel = {
               "spicetrellis/_version.py",
+              "spicetrellis/dco.py",
+              "spicetrellis/distribution_audit.py",
               "spicetrellis/py.typed",
+              "spicetrellis/raw_results.py",
+              "spicetrellis/release_artifacts.py",
+              "spicetrellis/result_json.py",
+              "spicetrellis/simulation_results.py",
+              "spicetrellis/xyce_results.py",
               "spicetrellis/schemas/circuit-ir-v1.schema.json",
+              "spicetrellis/schemas/simulation-result-v1.schema.json",
           }
           if missing := required_wheel - wheel_names:
               raise SystemExit(f"wheel is missing: {sorted(missing)}")
           PY
-      - name: Install wheel and smoke-import package
+      - name: Run the full suite from the exact source distribution
+        run: |
+          set -euo pipefail
+          source_root="$(mktemp -d "$RUNNER_TEMP/spicetrellis-sdist.XXXXXX")"
+          python -I - "$source_root" "dist/spicetrellis-$RELEASE_PROJECT_VERSION.tar.gz" <<'PY'
+          import sys
+          import tarfile
+          from pathlib import Path
+
+          destination = Path(sys.argv[1]).resolve(strict=True)
+          archive_path = Path(sys.argv[2]).resolve(strict=True)
+          with tarfile.open(archive_path, "r:gz") as archive:
+              archive.extractall(destination, filter="data")
+          PY
+          cd "$source_root/spicetrellis-$RELEASE_PROJECT_VERSION"
+          uv sync --frozen --extra dev
+          uv run --frozen pytest
+      - name: Install wheel and smoke-check API, schemas, result round trip, and CLI
         run: |
           python -m venv .release-smoke
           .release-smoke/bin/python -m pip install --disable-pip-version-check --no-deps dist/*.whl
           .release-smoke/bin/python -I - <<'PY'
-          import importlib.metadata
-          import importlib.resources
+          import hashlib
           import json
           import subprocess
-          import sys
           import tempfile
+          from importlib.metadata import version
+          from importlib.resources import files
           from pathlib import Path
 
           import spicetrellis
 
-          installed = importlib.metadata.version("spicetrellis")
-          if spicetrellis.__version__ != installed:
+          expected = version("spicetrellis")
+          if spicetrellis.__version__ != expected:
               raise SystemExit("runtime and distribution versions differ")
-          output = subprocess.check_output(
-              [sys.executable, "-I", "-m", "spicetrellis", "--version"], text=True
-          ).strip()
-          if output != f"spice-trellis {installed}":
-              raise SystemExit(f"unexpected CLI version: {output!r}")
-          schema = importlib.resources.files("spicetrellis").joinpath(
-              "schemas/circuit-ir-v1.schema.json"
-          ).read_text(encoding="utf-8")
-          if json.loads(schema)["$id"] != "urn:org.spicetrellis:circuit-ir:1":
-              raise SystemExit("installed Circuit IR schema has the wrong identity")
-          with tempfile.TemporaryDirectory() as directory:
+          cli = str(Path(".release-smoke/bin/spice-trellis").resolve())
+          completed = subprocess.run(
+              [cli, "--version"], check=True, capture_output=True, text=True
+          )
+          if completed.stdout.strip() != f"spice-trellis {expected}":
+              raise SystemExit("CLI version does not match distribution metadata")
+          schema_root = files("spicetrellis").joinpath("schemas")
+          expected_schemas = {
+              "circuit-ir-v1.schema.json": "org.spicetrellis.circuit-ir",
+              "simulation-result-v1.schema.json": "org.spicetrellis.simulation-result",
+          }
+          for name, identity in expected_schemas.items():
+              schema = json.loads(schema_root.joinpath(name).read_text(encoding="utf-8"))
+              if identity not in json.dumps(schema, sort_keys=True):
+                  raise SystemExit(f"installed schema {name} has the wrong identity")
+          required_api = ("load_raw", "load_xyce_csv", "load_result", "dump_result")
+          if any(not callable(getattr(spicetrellis, name, None)) for name in required_api):
+              raise SystemExit("installed public result API is incomplete")
+          if spicetrellis.RESULT_VERSION != 1:
+              raise SystemExit("installed result contract version is unexpected")
+          with tempfile.TemporaryDirectory(prefix="spicetrellis-wheel-smoke-") as directory:
               root = Path(directory)
-              deck = root / "smoke.sp"
-              artifact = root / "smoke.ir.json"
-              deck.write_text("R1 in 0 1k\n.end\n", encoding="utf-8")
+              source = root / "xyce.csv"
+              payload = b"TIME,V(out)\n0,0\n1e-9,1\n"
+              source.write_bytes(payload)
+              direct = spicetrellis.load_xyce_csv(source, analysis="transient")
+              if direct.source_sha256 != hashlib.sha256(payload).hexdigest():
+                  raise SystemExit("installed Xyce reader lost its exact source identity")
+              if spicetrellis.load_result_text(spicetrellis.dump_result(direct)) != direct:
+                  raise SystemExit("installed result JSON did not round trip")
+              output = root / "result.json"
               subprocess.run(
-                  [sys.executable, "-I", "-m", "spicetrellis", "export-ir", str(deck),
-                   "--compact", "-o", str(artifact)],
+                  [
+                      cli,
+                      "read-result",
+                      str(source),
+                      "--format",
+                      "xyce-csv",
+                      "--analysis",
+                      "transient",
+                      "--output",
+                      str(output),
+                  ],
                   check=True,
-              )
-              checked = subprocess.check_output(
-                  [sys.executable, "-I", "-m", "spicetrellis", "check-ir", str(artifact)],
+                  capture_output=True,
                   text=True,
+                  cwd=directory,
               )
-              if json.loads(checked)["instances"] != 1:
-                  raise SystemExit("installed Circuit IR CLI smoke returned the wrong shape")
+              checked = subprocess.run(
+                  [cli, "check-result", str(output)],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+                  cwd=directory,
+              )
+              summary = json.loads(checked.stdout)
+              if summary["source_sha256"] != direct.source_sha256:
+                  raise SystemExit("installed result CLI changed the source identity")
+              if spicetrellis.load_result(output) != direct:
+                  raise SystemExit("installed API and CLI result contracts differ")
           PY
+          site_packages="$(.release-smoke/bin/python -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+          installation_root="$(realpath .release-smoke)"
+          workspace_root="$(realpath "$GITHUB_WORKSPACE")"
+          if [ "$installation_root" != "$workspace_root/.release-smoke" ]; then
+            echo "release virtual environment resolved outside its expected root" >&2
+            exit 1
+          fi
+          case "$site_packages" in
+            "$installation_root"/*) ;;
+            *) echo "installed site-packages escaped the release virtual environment" >&2; exit 1 ;;
+          esac
+          echo "RELEASE_INSTALLATION_ROOT=$installation_root" >> "$GITHUB_ENV"
+          echo "RELEASE_SITE_PACKAGES=$site_packages" >> "$GITHUB_ENV"
       - name: Generate SPDX software bill of materials
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        env:
+          SYFT_CHECK_FOR_APP_UPDATE: "false"
+          SYFT_FILE_METADATA_SELECTION: all
+          SYFT_SOURCE_NAME: ${{ env.RELEASE_PROJECT_NAME }}
+          SYFT_SOURCE_VERSION: ${{ env.RELEASE_PROJECT_VERSION }}
         with:
-          path: dist
+          path: .release-smoke
           format: spdx-json
           output-file: dist/SBOM.spdx.json
+          syft-version: v${{ env.RELEASE_SYFT_VERSION }}
           upload-artifact: false
-      - name: Generate and verify release checksums
+          upload-release-assets: false
+      - name: Bind and validate installed-wheel evidence and release checksums
         run: |
-          cd dist
-          sha256sum -- ./*.whl ./*.tar.gz ./SBOM.spdx.json > SHA256SUMS
-          sha256sum --check SHA256SUMS
-          python -c 'import json; assert json.load(open("SBOM.spdx.json"))["spdxVersion"] == "SPDX-2.3"'
-      - name: Upload verified distributions and release evidence
+          python -I -S src/spicetrellis/release_artifacts.py bind-installed-wheel \
+            --sbom dist/SBOM.spdx.json \
+            --site-packages "$RELEASE_SITE_PACKAGES" \
+            --installation-root "$RELEASE_INSTALLATION_ROOT" \
+            --expected-external-path "bin/spice-trellis" \
+            --wheel "dist/spicetrellis-$RELEASE_PROJECT_VERSION-py3-none-any.whl" \
+            --name "$RELEASE_PROJECT_NAME" \
+            --version "$RELEASE_PROJECT_VERSION"
+          python -I -S src/spicetrellis/release_artifacts.py validate-sbom \
+            --sbom dist/SBOM.spdx.json \
+            --name "$RELEASE_PROJECT_NAME" \
+            --version "$RELEASE_PROJECT_VERSION" \
+            --syft-version "$RELEASE_SYFT_VERSION"
+          python -I -S src/spicetrellis/release_artifacts.py write-checksums \
+            --directory dist \
+            --name "$RELEASE_PROJECT_NAME" \
+            --version "$RELEASE_PROJECT_VERSION"
+          python -I -S src/spicetrellis/release_artifacts.py verify-release \
+            --directory dist \
+            --name "$RELEASE_PROJECT_NAME" \
+            --version "$RELEASE_PROJECT_VERSION" \
+            --syft-version "$RELEASE_SYFT_VERSION"
+      - name: Upload the exact four verified release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-distributions
-          path: dist/*
+          path: |
+            dist/spicetrellis-${{ env.RELEASE_PROJECT_VERSION }}-py3-none-any.whl
+            dist/spicetrellis-${{ env.RELEASE_PROJECT_VERSION }}.tar.gz
+            dist/SBOM.spdx.json
+            dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 7
 
@@ -223,15 +393,27 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - name: Check out immutable release validation helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Download verified distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-distributions
           path: dist
+      - name: Re-verify downloaded release assets
+        run: >-
+          python -I -S src/spicetrellis/release_artifacts.py verify-release
+          --directory dist
+          --name "$RELEASE_PROJECT_NAME"
+          --version "$RELEASE_PROJECT_VERSION"
+          --syft-version "$RELEASE_SYFT_VERSION"
       - name: Attest verified distributions
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/*
+          subject-checksums: dist/SHA256SUMS
 
   github-release:
     name: Create GitHub release
@@ -244,23 +426,41 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out immutable release validation helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Download verified distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-distributions
           path: dist
+      - name: Re-verify downloaded release assets
+        run: >-
+          python -I -S src/spicetrellis/release_artifacts.py verify-release
+          --directory dist
+          --name "$RELEASE_PROJECT_NAME"
+          --version "$RELEASE_PROJECT_VERSION"
+          --syft-version "$RELEASE_SYFT_VERSION"
       - name: Create release exactly once
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          resolved_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
-          if [ "$resolved_sha" != "$GITHUB_SHA" ]; then
-            echo "tag moved during release: expected $GITHUB_SHA, resolved $resolved_sha" >&2
+          set -euo pipefail
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          if [ "$tag_sha" != "$GITHUB_SHA" ]; then
+            echo "release tag moved: expected $GITHUB_SHA, resolved $tag_sha" >&2
             exit 1
           fi
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo "GitHub release $RELEASE_TAG already exists; refusing to replace its assets."
             exit 1
           fi
-          gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes --repo "$GITHUB_REPOSITORY"
+          gh release create "$RELEASE_TAG" \
+            "dist/spicetrellis-$RELEASE_PROJECT_VERSION-py3-none-any.whl" \
+            "dist/spicetrellis-$RELEASE_PROJECT_VERSION.tar.gz" \
+            dist/SBOM.spdx.json \
+            dist/SHA256SUMS \
+            --verify-tag --generate-notes --repo "$GITHUB_REPOSITORY"

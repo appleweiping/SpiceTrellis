@@ -5,6 +5,30 @@ follows Keep a Changelog, and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-08
+
+### Added
+
+- Process-independent simulator result values with exact source digests, real/complex
+  columns, explicit dimensions, bounded metadata and immutable shape validation.
+- Rectangular SPICE raw readers for ASCII and explicitly endian-selected binary data,
+  including appended plots, declared quantities and vector display-grid metadata.
+- A conservative Xyce CSV profile that preserves balanced expression headers such as
+  `Re(V(a,b))`, real projection columns and original file order. Analysis is explicitly
+  caller-declared; physical units, complex recombination and step grouping are not guessed.
+- Version 1 of `org.spicetrellis.simulation-result`, its packaged Draft 2020-12 schema,
+  strict UTF-8 JSON reading, lazy bounded JSON writing and atomic protected outputs.
+- Public Python result APIs, `read-result` and `check-result` commands, complete-artifact
+  resource limits and memory-amplification regressions. Original real-simulator oracle
+  harnesses exercise ngspice OP/DC/AC/transient ASCII/binary artifacts and Xyce DC,
+  complex AC projections and finite-rise transient CSV data with JSON round trips.
+
+### Security
+
+- Release workflows now bind signed annotated tags to GitHub-verified commits on protected
+  `main`, require the exact successful main-push CI run, re-test the frozen source archive,
+  and bind file-level SPDX evidence to the installed wheel before publication.
+
 ## [0.4.0] - 2026-09-07
 
 ### Added
