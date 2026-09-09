@@ -5,11 +5,11 @@ import tomllib
 from pathlib import Path
 
 
-def test_transitional_checkout_dco_is_marked_until_trusted_context_is_required() -> None:
+def test_trusted_base_dco_replaces_the_transitional_checkout_gate() -> None:
     ci = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert "Transitional bootstrap" in ci
-    assert "\n  dco:" in ci
-    assert "git rev-list" in ci
+    assert "\n  dco:" not in ci
+    assert "git rev-list" not in ci
+    assert "DCO / commits" in Path("CONTRIBUTING.md").read_text(encoding="utf-8")
 
 
 def test_actions_are_pinned_to_full_commits() -> None:
