@@ -1,8 +1,8 @@
-# Circuit IR for Go
+# Go interoperability
 
-This directory is an independent, zero-dependency Go 1.23+ consumer for SpiceTrellis Circuit IR
-version 1. It proves that the wire contract is usable without importing Python parser classes.
-It is not a SPICE parser and does not run a simulator.
+This directory contains independent, zero-dependency Go 1.23+ consumers for SpiceTrellis Circuit
+IR version 1 and physical-library JSON version 1. They prove that both wire contracts are usable
+without importing Python parser classes. Neither package is a SPICE parser or simulator.
 
 ```go
 document, err := circuitir.Load("circuit.ir.json")
@@ -22,7 +22,49 @@ go run ./cmd/circuitir-check --require-lossless ../../../build/circuit.ir.json
 Status 0 means valid, status 1 means valid but disallowed by `--require-lossless`, and status 2
 means usage, I/O, JSON, or contract validation failed.
 
-## Validation parity
+## Physical-library JSON
+
+`physicalir` strictly decodes the complete raw physical-library v1 document, including exact
+signed/unsigned 64-bit database-unit fields, technology layers, cells, raw layout, abstract
+views, ports, instances, annotations, and all three geometry variants:
+
+```go
+library, err := physicalir.Load("physical-library.json")
+if err != nil {
+    return err
+}
+for _, cell := range library.Cells {
+    // Consume validated raw views without Python.
+    _ = cell.Layout
+}
+```
+
+The corresponding checker reports the decoded library identity and raw layer, cell, and stored
+`Shape` record counts together with the SHA-256 of the exact input bytes. Shape records include
+layout, blockage, and port-access shapes; the abstract outline polygon is not a `Shape` record:
+
+```bash
+go run ./cmd/physicalir-check ../../../build/physical-library.json
+```
+
+Status 0 means that the whole document decoded and passed semantic validation; status 2 means
+usage, I/O, JSON, geometry, reference, hierarchy, or resource validation failed. The input digest
+is not a canonical fingerprint: it is directly comparable only for byte-identical files.
+
+The physical package deliberately does not flatten hierarchy, infer connectivity from coincident
+geometry, run design-rule checks, extract parasitics, or claim foundry/PDK semantics. Python owns
+those higher-level operations when explicitly supported.
+
+Physical JSON decoding rejects duplicate and unknown members, noncanonical or out-of-range
+decimal strings, invalid geometry, broken layer/cell/port references, cycles, excessive hierarchy
+depth, and aggregate item/point/text/polygon-work limits. Geometric predicates and areas use
+`math/big`, so valid signed-64 coordinates cannot overflow intermediate calculations.
+
+Python and Go both execute the positive documents and 20-case rejection corpus under
+`../fixtures/physical-v1/`; this pins the shared wire semantics without treating JSON Schema as a
+substitute for semantic validation.
+
+## Circuit IR validation parity
 
 The Go decoder independently checks:
 
@@ -53,8 +95,8 @@ statement coverage on Linux from the profile's raw covered and total statement c
 rounding the displayed percentage. The module uses only the Go standard library; `go.mod` is
 therefore the complete dependency inventory.
 
-Both implementations execute `../fixtures/rejection-corpus-v1.json`. It pins ambiguous wire cases
-that historically diverged between standard-library decoders: dot and case-aliased paths,
+The Circuit IR implementations execute `../fixtures/rejection-corpus-v1.json`. It pins ambiguous
+wire cases that historically diverged between standard-library decoders: dot and case-aliased paths,
 out-of-range coordinates, non-ASCII numeric atoms and whitespace, Unicode case-folded suffixes,
 oversized exponents, lone surrogate escapes, and the replacement character. CI additionally emits
 a multi-file artifact with the Python CLI and checks its full fingerprint with this Go consumer.
@@ -73,5 +115,5 @@ verifies the signature, ancestry, version match, race detector, vet, and coverag
 version is considered published. Consumers can then use:
 
 ```bash
-go get github.com/appleweiping/SpiceTrellis/interop/go@v0.4.0
+go get github.com/appleweiping/SpiceTrellis/interop/go@v0.6.0
 ```

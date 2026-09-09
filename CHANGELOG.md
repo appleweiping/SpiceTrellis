@@ -5,6 +5,26 @@ follows Keep a Changelog, and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-09
+
+### Added
+
+- Immutable raw physical libraries with technology layer-purpose maps, ordered cell
+  interfaces, abstract access/blockage shapes, annotations and explicit cross-view references.
+- Exact signed-64-bit geometry: rectangles, simple polygons, constant-width paths,
+  eight Manhattan transforms, exact containment/area and half-grid path bounds.
+- Iterative hierarchy validation and expansion with preflight limits for cells,
+  shapes, points, polygon-validation work, annotations and aggregate stored text.
+- Version 1 physical-library JSON with canonical decimal strings for all 64-bit
+  fields, strict semantic decoding, lazy byte-bounded serialization and a packaged schema.
+- Public physical APIs, `check-physical` / `normalize-physical`, a runnable original
+  layout example, independent geometry/hierarchy oracles and serialization-memory regressions.
+- An independent zero-dependency Go physical-library consumer and checker with
+  exact big-integer geometry, shared conformance cases and live Python-to-Go CI.
+
+This raw-layout profile does not yet implement gridded placement, arbitrary-angle
+transforms, GDS/OASIS, shape Booleans, extraction or foundry sign-off.
+
 ## [0.5.0] - 2026-09-08
 
 ### Added

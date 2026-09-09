@@ -11,8 +11,8 @@
     ]
   },
   "runtime": {
-    "distribution_version": "0.5.0",
-    "source_sha256": "3072e243e14568e5f29a73cc6c25f9c227b49b79a78f70ac8b865ed0ff9bb429"
+    "distribution_version": "0.6.0",
+    "source_sha256": "36e045ebb17db4ea7c096b8d227303eb64437e57a403efbfc34806c240995eea"
   },
   "command": "python benchmarks/benchmark.py --iterations 25 --ir-instances 5000 --ir-iterations 1",
   "expected": {"decks_per_iteration": 2, "elements_per_iteration": 23},

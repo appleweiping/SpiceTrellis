@@ -26,6 +26,8 @@ from spicetrellis.api import (
 )
 from spicetrellis.emit import format_diagnostics, to_json
 from spicetrellis.model import Analysis
+from spicetrellis.physical import FlattenLimits, flatten_layout
+from spicetrellis.physical_json import dump_physical, load_physical, physical_digest
 from spicetrellis.provenance import Origin, build_index
 from spicetrellis.result_json import dump_result
 from spicetrellis.semantics import DEFAULT_ANALYSIS_LIMITS
@@ -318,6 +320,60 @@ def _add_result_limits(parser: argparse.ArgumentParser) -> None:
         )
 
 
+def _command_check_physical(args: argparse.Namespace) -> int:
+    limits = FlattenLimits(
+        cells=args.max_cells,
+        shapes=args.max_shapes,
+        points=args.max_points,
+        polygon_work=args.max_polygon_work,
+        annotations=args.max_annotations,
+    )
+    library = load_physical(args.path)
+    expansion: dict[str, object] | None = None
+    if args.top is not None:
+        flat = flatten_layout(library, args.top, limits=limits)
+        bounds = flat.bounds
+        expansion = {
+            "top": flat.top,
+            "cells": flat.expanded_cells,
+            "shapes": len(flat.shapes),
+            "annotations": len(flat.annotations),
+            "bounds": None
+            if bounds is None
+            else [
+                str(value)
+                for value in (
+                    bounds.left,
+                    bounds.bottom,
+                    bounds.right,
+                    bounds.top,
+                )
+            ],
+        }
+    sys.stdout.write(
+        to_json(
+            {
+                "name": library.name,
+                "unit": library.unit.value,
+                "content_sha256": physical_digest(library),
+                "technology": library.technology.name,
+                "layers": len(library.technology.layers),
+                "cell_definitions": len(library.cells),
+                "layout_expansion": expansion,
+            }
+        )
+    )
+    return 0
+
+
+def _command_normalize_physical(args: argparse.Namespace) -> int:
+    library = load_physical(args.path)
+    _write_or_print(
+        dump_physical(library), args.output, force=args.force, protected=(Path(args.path),)
+    )
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="spice-trellis")
     parser.add_argument("--version", action="version", version=f"spice-trellis {__version__}")
@@ -417,6 +473,26 @@ def _parser() -> argparse.ArgumentParser:
     check_result.add_argument("path")
     _add_result_limits(check_result)
     check_result.set_defaults(handler=_command_check_result)
+
+    check_physical = subparsers.add_parser(
+        "check-physical", help="validate raw physical-library JSON; optionally expand a layout"
+    )
+    check_physical.add_argument("path")
+    check_physical.add_argument("--top", help="materialize this cell after full resource preflight")
+    defaults = FlattenLimits()
+    for name in ("cells", "shapes", "points", "polygon_work", "annotations"):
+        check_physical.add_argument(
+            "--max-" + name.replace("_", "-"), type=int, default=getattr(defaults, name)
+        )
+    check_physical.set_defaults(handler=_command_check_physical)
+
+    normalize_physical = subparsers.add_parser(
+        "normalize-physical", help="emit canonical lossless physical JSON"
+    )
+    normalize_physical.add_argument("path")
+    normalize_physical.add_argument("-o", "--output")
+    normalize_physical.add_argument("--force", action="store_true")
+    normalize_physical.set_defaults(handler=_command_normalize_physical)
     return parser
 
 

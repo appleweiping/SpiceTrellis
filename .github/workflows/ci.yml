@@ -149,3 +149,44 @@ jobs:
               raise SystemExit("Python and Go instance counts differ")
           print(f"cross-language fingerprint verified: {circuit.fingerprint}")
           PY
+      - name: Produce physical JSON with Python and consume with Go
+        shell: bash
+        run: |
+          uv run --frozen python -I examples/physical_library.py \
+            "$RUNNER_TEMP/producer.physical.json"
+          (cd interop/go && go run ./cmd/physicalir-check \
+            "$RUNNER_TEMP/producer.physical.json") > "$RUNNER_TEMP/go-physical-summary.json"
+          uv run --frozen python -I - "$RUNNER_TEMP/producer.physical.json" "$RUNNER_TEMP/go-physical-summary.json" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+          from spicetrellis import load_physical, physical_digest
+
+          wire = Path(sys.argv[1])
+          library = load_physical(wire)
+          shape_count = 0
+          for cell in library.cells:
+              if cell.layout is not None:
+                  shape_count += len(cell.layout.shapes)
+              if cell.abstract is not None:
+                  shape_count += len(cell.abstract.blockages)
+                  shape_count += sum(len(port.shapes) for port in cell.abstract.ports)
+          input_sha256 = hashlib.sha256(wire.read_bytes()).hexdigest()
+          if input_sha256 != physical_digest(library):
+              raise SystemExit("fresh Python physical output is not canonical")
+          expected = {
+              "schema": "org.spicetrellis.physical-library",
+              "version": 1,
+              "library": library.name,
+              "libraries": 1,
+              "layers": len(library.technology.layers),
+              "cells": len(library.cells),
+              "shapes": shape_count,
+              "input_sha256": input_sha256,
+          }
+          summary = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          if summary != expected:
+              raise SystemExit(f"Python and Go physical summaries differ: {summary!r} != {expected!r}")
+          print(f"cross-language physical input verified: {input_sha256}")
+          PY

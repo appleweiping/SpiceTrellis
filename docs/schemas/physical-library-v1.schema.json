@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/appleweiping/SpiceTrellis/physical-library-v1.schema.json",
+  "title": "SpiceTrellis physical library v1",
+  "description": "Wire shape only. Use the semantic decoder for exact integer ranges, geometric validity, referenced layers/cells, acyclicity, interface consistency and aggregate resource budgets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "name", "unit", "technology", "cells"],
+  "properties": {
+    "schema": {"const": "org.spicetrellis.physical-library"},
+    "version": {"const": 1, "type": "integer"},
+    "name": {"$ref": "#/$defs/name"},
+    "unit": {"enum": ["um", "nm", "angstrom"]},
+    "technology": {"$ref": "#/$defs/technology"},
+    "cells": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/cell"}}
+  },
+  "$defs": {
+    "name": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]+$(?![\\s\\S])"},
+    "optionalName": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/name"}]},
+    "signed64": {"type": "string", "pattern": "^(0|-?[1-9][0-9]{0,18})$(?![\\s\\S])", "description": "Canonical decimal integer in -9223372036854775808..9223372036854775807; range checked semantically."},
+    "unsigned64": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,19})$(?![\\s\\S])", "description": "Canonical decimal integer in 0..18446744073709551615; range checked semantically."},
+    "point": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/signed64"}},
+    "layer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "number", "datatype", "purpose", "description"],
+      "properties": {
+        "id": {"$ref": "#/$defs/name"},
+        "number": {"$ref": "#/$defs/unsigned64"},
+        "datatype": {"$ref": "#/$defs/unsigned64"},
+        "purpose": {"enum": ["unknown", "drawing", "pin", "label", "obstruction", "outline"]},
+        "description": {"type": "string", "maxLength": 4096}
+      }
+    },
+    "technology": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "layers", "packages"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "layers": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/layer"}},
+        "packages": {"type": "array", "maxItems": 4096, "uniqueItems": true, "items": {"$ref": "#/$defs/name"}}
+      }
+    },
+    "rectangle": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "origin", "size"],
+      "properties": {
+        "kind": {"const": "rectangle"},
+        "origin": {"$ref": "#/$defs/point"},
+        "size": {"$ref": "#/$defs/point"}
+      }
+    },
+    "polygon": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "vertices"],
+      "properties": {
+        "kind": {"const": "polygon"},
+        "vertices": {"type": "array", "minItems": 3, "maxItems": 1024, "items": {"$ref": "#/$defs/point"}}
+      }
+    },
+    "path": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "points", "width"],
+      "properties": {
+        "kind": {"const": "path"},
+        "points": {"type": "array", "minItems": 2, "maxItems": 100000, "items": {"$ref": "#/$defs/point"}},
+        "width": {"$ref": "#/$defs/signed64"}
+      }
+    },
+    "shape": {
+      "type": "object", "additionalProperties": false,
+      "required": ["layer", "geometry", "net"],
+      "properties": {
+        "layer": {"$ref": "#/$defs/name"},
+        "net": {"$ref": "#/$defs/optionalName"},
+        "geometry": {"oneOf": [{"$ref": "#/$defs/rectangle"}, {"$ref": "#/$defs/polygon"}, {"$ref": "#/$defs/path"}]}
+      }
+    },
+    "shapes": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/shape"}},
+    "transform": {
+      "type": "object", "additionalProperties": false,
+      "required": ["origin", "clockwise", "reflect_x"],
+      "properties": {
+        "origin": {"$ref": "#/$defs/point"},
+        "clockwise": {"type": "integer", "enum": [0, 90, 180, 270]},
+        "reflect_x": {"type": "boolean"}
+      }
+    },
+    "instance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "cell", "transform"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "cell": {"$ref": "#/$defs/name"},
+        "transform": {"$ref": "#/$defs/transform"}
+      }
+    },
+    "annotation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["text", "at"],
+      "properties": {"text": {"$ref": "#/$defs/name"}, "at": {"$ref": "#/$defs/point"}}
+    },
+    "layout": {
+      "type": "object", "additionalProperties": false,
+      "required": ["shapes", "instances", "annotations"],
+      "properties": {
+        "shapes": {"$ref": "#/$defs/shapes"},
+        "instances": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/instance"}},
+        "annotations": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/annotation"}}
+      }
+    },
+    "port": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "shapes"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "shapes": {"allOf": [{"$ref": "#/$defs/shapes"}], "minItems": 1}
+      }
+    },
+    "abstract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["outline", "ports", "blockages"],
+      "properties": {
+        "outline": {"$ref": "#/$defs/polygon"},
+        "ports": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/port"}},
+        "blockages": {"$ref": "#/$defs/shapes"}
+      }
+    },
+    "cell": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "ports", "layout", "abstract", "circuit_module"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "ports": {"type": "array", "maxItems": 100000, "uniqueItems": true, "items": {"$ref": "#/$defs/name"}},
+        "layout": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/layout"}]},
+        "abstract": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/abstract"}]},
+        "circuit_module": {"$ref": "#/$defs/optionalName"}
+      },
+      "not": {"properties": {"layout": {"type": "null"}, "abstract": {"type": "null"}, "circuit_module": {"type": "null"}}}
+    }
+  }
+}
