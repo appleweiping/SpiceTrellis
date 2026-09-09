@@ -43,6 +43,10 @@ successful parsing does not establish simulator convergence or successful execut
   a strict versioned result-JSON contract. Binary raw byte order is explicit;
   Xyce projection columns and original row order are preserved without guessing
   physical units or sweep boundaries. See [result profiles](docs/simulator-results.md).
+- Raw physical-library JSON with exact integer geometry, technology layer-purpose
+  maps, abstract interfaces, hierarchy validation and bounded materialization.
+  Decimal-string coordinates preserve all 64 bits across JSON consumers. This is
+  geometry interchange, not extraction or DRC sign-off; see [physical views](docs/physical-library.md).
 - No runtime Python dependencies.
 
 Unknown directives and element families are preserved as opaque cards and
@@ -161,8 +165,8 @@ spice-trellis lint examples/hierarchical_filter/broken.sp
 
 ## CLI reference
 
-The command line exposes nine subcommands, each taking exactly one input path as
-its only positional argument:
+The command line exposes thirteen subcommands. Each accepts one input path;
+`locate` also accepts an optional card name or index:
 
 - `parse`: syntax JSON for a single file.
 - `lint`: include-following analysis and diagnostics.
@@ -173,13 +177,17 @@ its only positional argument:
 - `fuzz-smoke`: bounded deterministic parser mutation counters.
 - `export-ir`: versioned language-neutral circuit hierarchy.
 - `check-ir`: strict validation and identity report for saved circuit IR.
+- `read-result`: convert supported raw or Xyce CSV outputs to result JSON.
+- `check-result`: validate saved result JSON and summarize its declared shape.
+- `check-physical`: validate physical JSON and optionally materialize a named layout.
+- `normalize-physical`: emit canonical physical JSON without geometry loss.
 
 `parse`, `lint`, `inventory`, and `fuzz-smoke` always write to standard output.
 `flatten` and `format` write to standard output unless `-o`/`--output` names a
 file. `lint` renders diagnostics as its result and `parse` embeds them in its
 JSON; `flatten`, `format`, and `inventory` instead write blocking diagnostics to
 standard error and produce no artifact. `--include-root` is accepted by the
-three commands that follow includes (`lint`, `flatten`, and `inventory`) and may
+commands that follow includes (`lint`, `flatten`, `locate`, `inventory`, and `export-ir`) and may
 be repeated.
 
 `spice-trellis <command> --help` prints the options for one subcommand.
@@ -189,7 +197,7 @@ spice-trellis --version
 ```
 
 ```text
-spice-trellis 0.5.0
+spice-trellis 0.6.0
 ```
 
 ### Parse one file

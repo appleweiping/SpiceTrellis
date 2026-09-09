@@ -1,0 +1,119 @@
+{
+  "schema": "org.spicetrellis.physical-library",
+  "version": 1,
+  "name": "interop-library",
+  "unit": "nm",
+  "technology": {
+    "name": "process-demo",
+    "packages": ["primitive", "custom"],
+    "layers": [
+      {
+        "id": "m1",
+        "number": "18446744073709551615",
+        "datatype": "18446744073709551615",
+        "purpose": "drawing",
+        "description": "exact geometry"
+      },
+      {
+        "id": "pin",
+        "number": "1",
+        "datatype": "1",
+        "purpose": "pin",
+        "description": ""
+      }
+    ]
+  },
+  "cells": [
+    {
+      "name": "top",
+      "ports": [],
+      "circuit_module": null,
+      "layout": {
+        "shapes": [],
+        "annotations": [],
+        "instances": [
+          {
+            "name": "mirror",
+            "cell": "leaf",
+            "transform": {
+              "origin": ["20", "30"],
+              "clockwise": 90,
+              "reflect_x": true
+            }
+          }
+        ]
+      },
+      "abstract": null
+    },
+    {
+      "name": "leaf",
+      "ports": ["p"],
+      "circuit_module": "circuit/leaf",
+      "layout": {
+        "shapes": [
+          {
+            "layer": "m1",
+            "net": "p",
+            "geometry": {
+              "kind": "rectangle",
+              "origin": ["-3", "-4"],
+              "size": ["4", "8"]
+            }
+          },
+          {
+            "layer": "m1",
+            "net": null,
+            "geometry": {
+              "kind": "polygon",
+              "vertices": [["0", "0"], ["2", "0"], ["0", "2"]]
+            }
+          },
+          {
+            "layer": "m1",
+            "net": null,
+            "geometry": {
+              "kind": "path",
+              "points": [["2", "3"], ["3", "4"]],
+              "width": "1"
+            }
+          }
+        ],
+        "annotations": [{"text": "label != connectivity", "at": ["0", "0"]}],
+        "instances": []
+      },
+      "abstract": {
+        "outline": {
+          "kind": "polygon",
+          "vertices": [["-5", "-5"], ["5", "-5"], ["5", "7"], ["-5", "7"]]
+        },
+        "ports": [
+          {
+            "name": "p",
+            "shapes": [
+              {
+                "layer": "pin",
+                "net": "p",
+                "geometry": {
+                  "kind": "rectangle",
+                  "origin": ["-3", "-4"],
+                  "size": ["1", "1"]
+                }
+              }
+            ]
+          }
+        ],
+        "blockages": [
+          {
+            "layer": "m1",
+            "net": null,
+            "geometry": {
+              "kind": "rectangle",
+              "origin": ["-3", "-4"],
+              "size": ["4", "8"]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

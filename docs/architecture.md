@@ -12,6 +12,12 @@ SpiceTrellis has four primary invariants:
 The implementation is intentionally split into phases with immutable values at
 their boundaries.
 
+The independent physical-view boundary uses `geometry.py` for exact database-unit
+isometries/intersection/containment, `physical.py` for technology and multi-view
+cell validation plus preflighted hierarchy materialization, and `physical_json.py`
+for strict decimal-string 64-bit interchange. It never infers electrical
+connectivity from labels or coincident shapes. See [its contract](physical-library.md).
+
 ```text
 UTF-8 files
     |

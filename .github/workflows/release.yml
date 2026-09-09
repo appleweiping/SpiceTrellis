@@ -15,7 +15,7 @@ permissions:
 
 env:
   RELEASE_PROJECT_NAME: spicetrellis
-  RELEASE_PROJECT_VERSION: "0.5.0"
+  RELEASE_PROJECT_VERSION: "0.6.0"
   RELEASE_SYFT_VERSION: "1.51.1"
 
 jobs:
@@ -175,14 +175,33 @@ jobs:
               "CITATION.cff",
               "benchmarks/benchmark.py",
               "benchmarks/manifest.json",
+              "benchmarks/physical-v060-regression-20260909.json",
               "docs/schemas/circuit-ir-v1.schema.json",
               "docs/schemas/simulation-result-v1.schema.json",
+              "docs/schemas/physical-library-v1.schema.json",
+              "docs/physical-library.md",
+              "examples/physical_library.py",
               "docs/schemas/structural-summary-v1.schema.json",
               "interop/go/README.md",
               "interop/go/circuitir/decode.go",
+              "interop/go/cmd/physicalir-check/main.go",
+              "interop/go/cmd/physicalir-check/main_test.go",
               "interop/go/go.mod",
+              "interop/go/physicalir/decode.go",
+              "interop/go/physicalir/decode_edges_test.go",
+              "interop/go/physicalir/geometry.go",
+              "interop/go/physicalir/physicalir_test.go",
+              "interop/go/physicalir/types.go",
+              "interop/go/physicalir/validate.go",
+              "interop/go/physicalir/validate_test.go",
+              "interop/fixtures/physical-v1/rich-v1.json",
+              "interop/fixtures/physical-v1/extreme-polygon-v1.json",
+              "interop/fixtures/physical-v1/rejection-corpus-v1.json",
               "src/spicetrellis/dco.py",
               "src/spicetrellis/distribution_audit.py",
+              "src/spicetrellis/geometry.py",
+              "src/spicetrellis/physical.py",
+              "src/spicetrellis/physical_json.py",
               "src/spicetrellis/raw_results.py",
               "src/spicetrellis/release_artifacts.py",
               "src/spicetrellis/result_json.py",
@@ -190,6 +209,13 @@ jobs:
               "src/spicetrellis/xyce_results.py",
               "tests/test_dco.py",
               "tests/test_distribution_audit.py",
+              "tests/test_geometry.py",
+              "tests/test_geometry_oracle.py",
+              "tests/test_physical.py",
+              "tests/test_physical_oracle.py",
+              "tests/test_physical_json.py",
+              "tests/test_physical_json_oracle.py",
+              "tests/test_physical_integration.py",
               "tests/test_raw_results.py",
               "tests/test_release_artifacts.py",
               "tests/test_release_workflow.py",
@@ -211,6 +237,9 @@ jobs:
               "spicetrellis/_version.py",
               "spicetrellis/dco.py",
               "spicetrellis/distribution_audit.py",
+              "spicetrellis/geometry.py",
+              "spicetrellis/physical.py",
+              "spicetrellis/physical_json.py",
               "spicetrellis/py.typed",
               "spicetrellis/raw_results.py",
               "spicetrellis/release_artifacts.py",
@@ -219,6 +248,7 @@ jobs:
               "spicetrellis/xyce_results.py",
               "spicetrellis/schemas/circuit-ir-v1.schema.json",
               "spicetrellis/schemas/simulation-result-v1.schema.json",
+              "spicetrellis/schemas/physical-library-v1.schema.json",
           }
           if missing := required_wheel - wheel_names:
               raise SystemExit(f"wheel is missing: {sorted(missing)}")
@@ -268,6 +298,7 @@ jobs:
           expected_schemas = {
               "circuit-ir-v1.schema.json": "org.spicetrellis.circuit-ir",
               "simulation-result-v1.schema.json": "org.spicetrellis.simulation-result",
+              "physical-library-v1.schema.json": "org.spicetrellis.physical-library",
           }
           for name, identity in expected_schemas.items():
               schema = json.loads(schema_root.joinpath(name).read_text(encoding="utf-8"))
@@ -318,6 +349,26 @@ jobs:
                   raise SystemExit("installed result CLI changed the source identity")
               if spicetrellis.load_result(output) != direct:
                   raise SystemExit("installed API and CLI result contracts differ")
+              from spicetrellis.geometry import Point, Rectangle, Transform
+              from spicetrellis.physical import (
+                  DistanceUnit, LayerPurpose, LayerSpec, LayoutView, PhysicalCell,
+                  PhysicalInstance, PhysicalLibrary, PhysicalShape, Technology,
+              )
+              technology = Technology("smoke", (LayerSpec("m1", 2**64 - 1, 0, LayerPurpose.DRAWING),))
+              leaf = PhysicalCell("leaf", layout=LayoutView((PhysicalShape("m1", Rectangle(Point(0, 0), 3, 7)),)))
+              top = PhysicalCell("top", layout=LayoutView(instances=(PhysicalInstance("x", "leaf", Transform(Point(11, 13), 90, True)),)))
+              physical = PhysicalLibrary("smoke", DistanceUnit.NANOMETER, technology, (top, leaf))
+              physical_path = root / "physical.json"
+              spicetrellis.write_physical(physical, physical_path)
+              if spicetrellis.load_physical(physical_path) != physical:
+                  raise SystemExit("installed physical JSON did not preserve exact geometry/layers")
+              flat = spicetrellis.flatten_layout(physical, "top")
+              if flat.expanded_cells != 2 or flat.shapes[0].shape.geometry.area != 21:
+                  raise SystemExit("installed physical hierarchy did not materialize correctly")
+              checked = subprocess.run([cli, "check-physical", str(physical_path), "--top", "top"],
+                                       check=True, capture_output=True, text=True, cwd=directory)
+              if json.loads(checked.stdout)["layout_expansion"]["shapes"] != 1:
+                  raise SystemExit("installed physical CLI disagrees with API")
           PY
           site_packages="$(.release-smoke/bin/python -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
           installation_root="$(realpath .release-smoke)"

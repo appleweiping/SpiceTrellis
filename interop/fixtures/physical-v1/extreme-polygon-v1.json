@@ -1,0 +1,46 @@
+{
+  "schema": "org.spicetrellis.physical-library",
+  "version": 1,
+  "name": "extreme-polygon",
+  "unit": "angstrom",
+  "technology": {
+    "name": "exact",
+    "packages": [],
+    "layers": [
+      {
+        "id": "outline",
+        "number": "0",
+        "datatype": "0",
+        "purpose": "outline",
+        "description": ""
+      }
+    ]
+  },
+  "cells": [
+    {
+      "name": "extreme",
+      "ports": [],
+      "circuit_module": null,
+      "layout": {
+        "shapes": [
+          {
+            "layer": "outline",
+            "net": null,
+            "geometry": {
+              "kind": "polygon",
+              "vertices": [
+                ["-9223372036854775808", "-9223372036854775808"],
+                ["9223372036854775807", "-9223372036854775808"],
+                ["9223372036854775807", "9223372036854775807"],
+                ["-9223372036854775808", "9223372036854775807"]
+              ]
+            }
+          }
+        ],
+        "annotations": [],
+        "instances": []
+      },
+      "abstract": null
+    }
+  ]
+}

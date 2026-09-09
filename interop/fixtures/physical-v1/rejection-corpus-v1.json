@@ -1,0 +1,106 @@
+{
+  "schema": "org.spicetrellis.physical-library-rejection-corpus",
+  "version": 1,
+  "cases": [
+    {
+      "name": "duplicate-root-member",
+      "old": "  \"version\": 1,\n",
+      "new": "  \"version\": 1,\n  \"version\": 1,\n"
+    },
+    {
+      "name": "unknown-root-member",
+      "old": "  \"version\": 1,\n",
+      "new": "  \"version\": 1,\n  \"extra\": true,\n"
+    },
+    {
+      "name": "floating-version",
+      "old": "  \"version\": 1,",
+      "new": "  \"version\": 1.0,"
+    },
+    {
+      "name": "numeric-coordinate",
+      "old": "\"origin\": [\"20\", \"30\"]",
+      "new": "\"origin\": [20, \"30\"]"
+    },
+    {
+      "name": "signed-coordinate-overflow",
+      "old": "\"origin\": [\"20\", \"30\"]",
+      "new": "\"origin\": [\"9223372036854775808\", \"30\"]"
+    },
+    {
+      "name": "unsigned-layer-overflow",
+      "old": "\"number\": \"18446744073709551615\"",
+      "new": "\"number\": \"18446744073709551616\""
+    },
+    {
+      "name": "negative-zero-coordinate",
+      "old": "\"origin\": [\"20\", \"30\"]",
+      "new": "\"origin\": [\"-0\", \"30\"]"
+    },
+    {
+      "name": "unicode-digit-coordinate",
+      "old": "\"origin\": [\"20\", \"30\"]",
+      "new": "\"origin\": [\"٢\", \"30\"]"
+    },
+    {
+      "name": "undeclared-layer",
+      "old": "\"layer\": \"m1\",\n            \"net\": \"p\"",
+      "new": "\"layer\": \"missing\",\n            \"net\": \"p\""
+    },
+    {
+      "name": "undefined-cell",
+      "old": "\"cell\": \"leaf\",",
+      "new": "\"cell\": \"missing\","
+    },
+    {
+      "name": "hierarchy-cycle",
+      "old": "\"cell\": \"leaf\",",
+      "new": "\"cell\": \"top\","
+    },
+    {
+      "name": "self-intersecting-polygon",
+      "old": "\"vertices\": [[\"0\", \"0\"], [\"2\", \"0\"], [\"0\", \"2\"]]",
+      "new": "\"vertices\": [[\"0\", \"0\"], [\"2\", \"2\"], [\"0\", \"2\"], [\"2\", \"0\"]]"
+    },
+    {
+      "name": "zero-rectangle-width",
+      "old": "\"size\": [\"4\", \"8\"]",
+      "new": "\"size\": [\"0\", \"8\"]"
+    },
+    {
+      "name": "zero-path-width",
+      "old": "\"width\": \"1\"",
+      "new": "\"width\": \"0\""
+    },
+    {
+      "name": "unknown-layer-purpose",
+      "old": "\"purpose\": \"drawing\"",
+      "new": "\"purpose\": \"conducting\""
+    },
+    {
+      "name": "abstract-port-net-mismatch",
+      "old": "\"layer\": \"pin\",\n                \"net\": \"p\"",
+      "new": "\"layer\": \"pin\",\n                \"net\": \"q\""
+    },
+    {
+      "name": "duplicate-cell-name",
+      "old": "\"name\": \"leaf\",\n      \"ports\": [\"p\"]",
+      "new": "\"name\": \"top\",\n      \"ports\": [\"p\"]"
+    },
+    {
+      "name": "unknown-geometry-member",
+      "old": "\"kind\": \"path\",",
+      "new": "\"kind\": \"path\", \"radius\": \"1\","
+    },
+    {
+      "name": "control-annotation",
+      "old": "\"text\": \"label != connectivity\"",
+      "new": "\"text\": \"label\\u0000\""
+    },
+    {
+      "name": "lone-surrogate-name",
+      "old": "\"name\": \"interop-library\"",
+      "new": "\"name\": \"\\ud800\""
+    }
+  ]
+}

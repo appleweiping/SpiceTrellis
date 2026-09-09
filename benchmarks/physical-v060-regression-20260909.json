@@ -1,0 +1,22 @@
+{
+  "circuit_ir_scale": {
+    "instances": 5000,
+    "iterations": 1,
+    "median_ms": 315.4402,
+    "minimum_ms": 315.4402,
+    "serialized_bytes": 1009700,
+    "workload_sha256": "d2cc341aec7c3474aef3b26e20f8abd0002392d8793243b7718a888156c2e814"
+  },
+  "decks_per_iteration": 2,
+  "elements_per_iteration": 23,
+  "iterations": 25,
+  "median_ms": 6.3441,
+  "minimum_ms": 4.8381,
+  "schema_version": 3,
+  "tool": {
+    "name": "SpiceTrellis",
+    "source_sha256": "36e045ebb17db4ea7c096b8d227303eb64437e57a403efbfc34806c240995eea",
+    "version": "0.6.0"
+  },
+  "workload_sha256": "9e161d08fd8de807afd900119d972352cfd2f193d985942272b5e81973e75af8"
+}
