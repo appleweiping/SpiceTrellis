@@ -50,6 +50,7 @@ packages = ["src/spicetrellis"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "docs/schemas/circuit-ir-v1.schema.json" = "spicetrellis/schemas/circuit-ir-v1.schema.json"
+"docs/schemas/simulation-result-v1.schema.json" = "spicetrellis/schemas/simulation-result-v1.schema.json"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -60,6 +61,7 @@ include = [
   "/interop",
   "/corpus",
   "/benchmarks",
+  "/tools",
   "/*.md",
   "/CITATION.cff",
   "/LICENSE",

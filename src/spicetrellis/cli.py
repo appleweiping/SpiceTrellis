@@ -17,13 +17,19 @@ from spicetrellis.api import (
     fuzz_smoke,
     inventory,
     load_ir,
+    load_raw,
+    load_result,
+    load_xyce_csv,
     parse_text,
     structural_summary,
+    write_result,
 )
 from spicetrellis.emit import format_diagnostics, to_json
 from spicetrellis.model import Analysis
 from spicetrellis.provenance import Origin, build_index
+from spicetrellis.result_json import dump_result
 from spicetrellis.semantics import DEFAULT_ANALYSIS_LIMITS
+from spicetrellis.simulation_results import ResultLimits
 
 
 def _roots(args: argparse.Namespace) -> tuple[Path, ...]:
@@ -246,6 +252,72 @@ def _command_check_ir(args: argparse.Namespace) -> int:
     return 1 if args.require_lossless and circuit.losses else 0
 
 
+def _result_limits(args: argparse.Namespace) -> ResultLimits:
+    return ResultLimits(
+        max_bytes=args.max_bytes,
+        max_plots=args.max_plots,
+        max_variables=args.max_variables,
+        max_points=args.max_points,
+        max_cells=args.max_cells,
+        max_line_bytes=args.max_line_bytes,
+    )
+
+
+def _command_read_result(args: argparse.Namespace) -> int:
+    limits = _result_limits(args)
+    if args.format == "raw":
+        if args.analysis is not None:
+            raise ValueError("raw input already declares analysis; --analysis is only for xyce-csv")
+        result = load_raw(args.path, byte_order=args.byte_order, limits=limits)
+    else:
+        if args.byte_order is not None:
+            raise ValueError("--byte-order is only for binary raw input")
+        if args.analysis is None:
+            raise ValueError("xyce-csv input requires a caller-declared --analysis")
+        result = load_xyce_csv(args.path, analysis=args.analysis, limits=limits)
+    if args.output:
+        write_result(
+            result, args.output, force=args.force, protected=(Path(args.path),), limits=limits
+        )
+    else:
+        sys.stdout.write(dump_result(result, limits=limits))
+    return 0
+
+
+def _command_check_result(args: argparse.Namespace) -> int:
+    result = load_result(args.path, limits=_result_limits(args))
+    summary = {
+        "format": result.format,
+        "source_sha256": result.source_sha256,
+        "plots": [
+            {
+                "analysis": plot.analysis,
+                "encoding": plot.encoding,
+                "variables": len(plot.variables),
+                "points": plot.points,
+            }
+            for plot in result.plots
+        ],
+    }
+    sys.stdout.write(to_json(summary))
+    return 0
+
+
+def _add_result_limits(parser: argparse.ArgumentParser) -> None:
+    defaults = ResultLimits()
+    for name in (
+        "max_bytes",
+        "max_plots",
+        "max_variables",
+        "max_points",
+        "max_cells",
+        "max_line_bytes",
+    ):
+        parser.add_argument(
+            "--" + name.replace("_", "-"), type=int, default=getattr(defaults, name)
+        )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="spice-trellis")
     parser.add_argument("--version", action="version", version=f"spice-trellis {__version__}")
@@ -325,6 +397,26 @@ def _parser() -> argparse.ArgumentParser:
     check_ir.add_argument("path")
     check_ir.add_argument("--require-lossless", action="store_true")
     check_ir.set_defaults(handler=_command_check_ir)
+
+    read_result = subparsers.add_parser(
+        "read-result",
+        help="convert simulator data to versioned result JSON (not proof of convergence)",
+    )
+    read_result.add_argument("path")
+    read_result.add_argument("--format", required=True, choices=("raw", "xyce-csv"))
+    read_result.add_argument("--byte-order", choices=("little", "big"))
+    read_result.add_argument("--analysis", help="caller-declared analysis for Xyce CSV only")
+    read_result.add_argument("-o", "--output")
+    read_result.add_argument("--force", action="store_true")
+    _add_result_limits(read_result)
+    read_result.set_defaults(handler=_command_read_result)
+
+    check_result = subparsers.add_parser(
+        "check-result", help="validate result JSON and summarize its declared identity and shape"
+    )
+    check_result.add_argument("path")
+    _add_result_limits(check_result)
+    check_result.set_defaults(handler=_command_check_result)
     return parser
 
 

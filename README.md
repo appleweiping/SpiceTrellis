@@ -13,6 +13,8 @@ deck with a machine-readable source map.
 
 The project does not run a simulator. It is intended for tooling that needs to
 understand a deck before choosing how or where to simulate it.
+It can also read supported simulator output artifacts without starting a process;
+successful parsing does not establish simulator convergence or successful execution.
 
 ## Current capabilities
 
@@ -37,6 +39,10 @@ understand a deck before choosing how or where to simulate it.
 - Stable text and JSON diagnostics suitable for local scripts and CI.
 - Versioned circuit IR with explicit hierarchy, canonical identities, checkout-independent source
   names, deterministic fingerprints, strict decoding, and declared losses for unsupported cards.
+- Bounded real/complex SPICE raw and Xyce CSV readers, exact input digests and
+  a strict versioned result-JSON contract. Binary raw byte order is explicit;
+  Xyce projection columns and original row order are preserved without guessing
+  physical units or sweep boundaries. See [result profiles](docs/simulator-results.md).
 - No runtime Python dependencies.
 
 Unknown directives and element families are preserved as opaque cards and
