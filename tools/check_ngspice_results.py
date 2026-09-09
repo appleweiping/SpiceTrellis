@@ -38,6 +38,19 @@ quit
 """
 
 
+def _check_transient(
+    times: tuple[float | complex, ...], outputs: tuple[float | complex, ...]
+) -> tuple[float, float]:
+    if len(times) < 20 or times[0].real != 0 or abs(times[-1].real - 0.005) > 1e-12:
+        raise AssertionError("transient artifact does not span the requested experiment")
+    error = 0.0
+    for time, output in zip(times, outputs, strict=True):
+        elapsed = time.real - 0.001
+        expected = 0.0 if elapsed <= 0 else -math.expm1(-elapsed / 0.001)
+        error = max(error, abs(output - expected))
+    return error, 1e-5
+
+
 def run(executable: str, *, timeout: float = 60.0) -> dict[str, object]:
     resolved = shutil.which(executable)
     if resolved is None:
@@ -106,11 +119,7 @@ def run(executable: str, *, timeout: float = 60.0) -> dict[str, object]:
                     expected = 1 / (1 + 2j * math.pi * frequency.real * 0.001)
                     error = max(error, abs(output - expected))
             else:
-                tolerance = 1e-5
-                for time, output in zip(vectors["time"], vectors["v(output)"], strict=True):
-                    elapsed = time.real - 0.001
-                    expected = 0.0 if elapsed <= 0 else -math.expm1(-elapsed / 0.001)
-                    error = max(error, abs(output - expected))
+                error, tolerance = _check_transient(vectors["time"], vectors["v(output)"])
             if error > tolerance:
                 raise AssertionError(f"{name} analytical error {error} exceeds {tolerance}")
             records.append(

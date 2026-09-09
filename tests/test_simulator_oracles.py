@@ -40,6 +40,12 @@ def test_xyce_ac_and_transient_oracles_reject_truncated_experiments() -> None:
         check("tran", {"TIME": (0.0, 0.001)})
 
 
+def test_ngspice_transient_oracle_rejects_a_truncated_experiment() -> None:
+    check = runpy.run_path(str(ROOT / "tools/check_ngspice_results.py"))["_check_transient"]
+    with pytest.raises(AssertionError, match="span"):
+        check((0.0,), (0.0,))
+
+
 @pytest.mark.parametrize("script", ["check_ngspice_results.py", "check_xyce_results.py"])
 def test_real_simulator_harness_does_not_substitute_fake_results(script, monkeypatch) -> None:
     harness = runpy.run_path(str(ROOT / "tools" / script))
