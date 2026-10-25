@@ -34,7 +34,6 @@ dev = [
   "pytest>=8.3",
   "pytest-cov>=6.0",
   "ruff>=0.9",
-  "twine==7.0.0",
 ]
 
 [project.scripts]
@@ -55,8 +54,6 @@ packages = ["src/spicetrellis"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-  "/.github/workflows",
-  "/.github/allowed_signers",
   "/src",
   "/tests",
   "/examples",

@@ -115,15 +115,6 @@ def test_documented_construction_example_executes():
     assert issubclass(PhysicalError, ValueError)
 
 
-def test_release_smoke_loads_the_real_installed_schema_and_materializes_geometry():
-    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
-    assert '"spicetrellis/schemas/physical-library-v1.schema.json"' in workflow
-    assert '"docs/schemas/physical-library-v1.schema.json"' in workflow
-    assert '"physical-library-v1.schema.json": "org.spicetrellis.physical-library"' in workflow
-    assert 'spicetrellis.flatten_layout(physical, "top")' in workflow
-    assert '"check-physical", str(physical_path), "--top", "top"' in workflow
-
-
 def test_original_physical_example_has_exact_documented_expansion(tmp_path, capsys):
     from spicetrellis import flatten_layout, write_physical
     from spicetrellis.geometry import Bounds

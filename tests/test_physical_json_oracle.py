@@ -105,12 +105,3 @@ def test_unicode_escape_semantics_match_go_without_surrogate_normalization(
     assert library.name == expected
 
 
-def test_ci_cross_language_gate_generates_fresh_physical_wire() -> None:
-    workflow = (FilePath(__file__).parents[1] / ".github" / "workflows" / "ci.yml").read_text(
-        encoding="utf-8"
-    )
-    assert "uv run --frozen python -I examples/physical_library.py" in workflow
-    assert "go run ./cmd/physicalir-check" in workflow
-    assert "hashlib.sha256(wire.read_bytes()).hexdigest()" in workflow
-    assert '"shapes": shape_count' in workflow
-    assert "if summary != expected:" in workflow
