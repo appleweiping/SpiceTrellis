@@ -143,7 +143,7 @@ Xnested in out other ratio=2
 
 
 def test_unknown_cards_are_preserved_with_warnings():
-    deck = parse_text("D1 a 0 diode\n.option post\n")
+    deck = parse_text("A1 [a] [b] amod\n.if (1)\n")
     assert all(isinstance(statement, Opaque) for statement in deck.statements)
     assert [item.code for item in deck.diagnostics] == ["ST1101", "ST1101"]
 

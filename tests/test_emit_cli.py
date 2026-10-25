@@ -60,7 +60,7 @@ def test_flatten_writes_deck_and_provenance(tmp_path):
         )
         == 0
     )
-    assert "X1__Rup" in output.read_text(encoding="utf-8")
+    assert "R.X1.Rup" in output.read_text(encoding="utf-8")
     assert json.loads(provenance.read_text(encoding="utf-8"))[0]["output_name"] == "VDD"
 
 
@@ -124,9 +124,17 @@ def test_io_failure_uses_exit_code_two(capsys):
     assert "spice-trellis:" in capsys.readouterr().err
 
 
-def test_direct_file_commands_reject_oversized_input_without_traceback(tmp_path, capsys):
+def test_direct_file_commands_reject_oversized_input_without_traceback(
+    tmp_path, capsys, monkeypatch
+):
+    import spicetrellis.cli
+    from spicetrellis.semantics import AnalysisLimits
+
+    monkeypatch.setattr(
+        spicetrellis.cli, "DEFAULT_ANALYSIS_LIMITS", AnalysisLimits(max_file_bytes=64)
+    )
     path = tmp_path / "oversized.sp"
-    path.write_bytes(b"*" * (2 * 1024 * 1024 + 1))
+    path.write_bytes(b"*" * 65)
     for command in ("parse", "format", "fuzz-smoke"):
         assert main([command, str(path)]) == 2
         assert "exceeds the" in capsys.readouterr().err

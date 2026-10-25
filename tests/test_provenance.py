@@ -44,7 +44,7 @@ def span(name: str, line: int) -> SourceSpan:
 def test_a_nested_card_reports_its_whole_expansion_chain(index: ProvenanceIndex) -> None:
     """The definition alone does not say which copy failed."""
 
-    origin = index.by_name("Xfilter__Xsecond__Cshunt")
+    origin = index.by_name("C.Xfilter.Xsecond.Cshunt")
     assert origin is not None
     assert origin.depth == 2
     assert origin.definition.filename.endswith("passive stages.sp")
@@ -54,8 +54,8 @@ def test_a_nested_card_reports_its_whole_expansion_chain(index: ProvenanceIndex)
 def test_two_copies_share_a_definition_and_differ_in_chain(
     index: ProvenanceIndex,
 ) -> None:
-    first = index.by_name("Xfilter__Xfirst__Rseries")
-    second = index.by_name("Xfilter__Xsecond__Rseries")
+    first = index.by_name("R.Xfilter.Xfirst.Rseries")
+    second = index.by_name("R.Xfilter.Xsecond.Rseries")
     assert first is not None and second is not None
     assert first.definition == second.definition
     assert first.expansion_chain != second.expansion_chain
@@ -72,21 +72,24 @@ def test_a_top_level_card_has_no_chain(index: ProvenanceIndex) -> None:
 def test_the_instance_path_splits_on_the_elaborator_separator(
     index: ProvenanceIndex,
 ) -> None:
-    """The elaborator encodes segments so `__` cannot occur inside one."""
+    """Flat names follow ngspice: device letter, instance path, own name."""
 
-    assert PATH_SEPARATOR == "__"
-    origin = index.by_name("Xfilter__Xfirst__Cshunt")
+    assert PATH_SEPARATOR == "."
+    origin = index.by_name("C.Xfilter.Xfirst.Cshunt")
     assert origin is not None
     assert origin.instance_path == ("Xfilter", "Xfirst")
     assert origin.local_name == "Cshunt"
 
 
-def test_a_name_containing_an_encoded_underscore_still_splits() -> None:
-    # `_u` is how the elaborator writes a literal underscore, so a name with
-    # one must not be mistaken for a path separator.
-    origin = Origin(0, "Xa_ub__R_uname", span("t.sp", 1), ())
-    assert origin.instance_path == ("Xa_ub",)
-    assert origin.local_name == "R_uname"
+def test_a_dot_in_the_card_name_does_not_lengthen_the_path() -> None:
+    # The expansion chain says how deep the card is, so only that many
+    # segments are read as instance names.
+    origin = Origin(0, "R.Xa.R1.extra", span("t.sp", 1), (span("t.sp", 2),))
+    assert origin.instance_path == ("Xa",)
+    assert origin.local_name == "R1.extra"
+    top = Origin(1, "R.top", span("t.sp", 3), ())
+    assert top.instance_path == ()
+    assert top.local_name == "R.top"
 
 
 def test_an_unknown_card_is_absent_rather_than_guessed(index: ProvenanceIndex) -> None:
@@ -95,10 +98,10 @@ def test_an_unknown_card_is_absent_rather_than_guessed(index: ProvenanceIndex) -
 
 
 def test_a_card_describes_itself_outermost_site_first(index: ProvenanceIndex) -> None:
-    origin = index.by_name("Xfilter__Xsecond__Rseries")
+    origin = index.by_name("R.Xfilter.Xsecond.Rseries")
     assert origin is not None
     lines = origin.describe().splitlines()
-    assert lines[0].startswith("Xfilter__Xsecond__Rseries")
+    assert lines[0].startswith("R.Xfilter.Xsecond.Rseries")
     assert "top.sp" in lines[1]
     assert lines[-1].lstrip().startswith("defined at")
     indents = [len(line) - len(line.lstrip()) for line in lines[1:]]
@@ -116,8 +119,8 @@ def test_one_line_in_a_twice_used_subcircuit_becomes_two_cards(
     use = index.by_source(str(CELLS.resolve()), 3)
     assert use.copies == 2
     assert [origin.output_name for origin in use.origins] == [
-        "Xfilter__Xfirst__Rseries",
-        "Xfilter__Xsecond__Rseries",
+        "R.Xfilter.Xfirst.Rseries",
+        "R.Xfilter.Xsecond.Rseries",
     ]
 
 
@@ -255,7 +258,7 @@ def test_the_command_traces_a_card_backwards(capsys) -> None:
             [
                 "locate",
                 str(TOP),
-                "Xfilter__Xsecond__Cshunt",
+                "C.Xfilter.Xsecond.Cshunt",
                 "--include-root",
                 str(EXAMPLE),
             ]

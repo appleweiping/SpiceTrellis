@@ -156,7 +156,16 @@ class End:
 
 @dataclass(frozen=True, slots=True)
 class Element:
-    """A supported primitive or subcircuit instance."""
+    """A device card or subcircuit instance.
+
+    ``nodes`` are circuit nodes, ``controls`` are other devices the card names
+    (the sensing source of an F/H/W card, the inductors of a K card).  ``value``
+    is the positional value: resistance, gain, area or coupling.  ``tail`` keeps
+    text that is passed through as written, such as a source's ``DC 1 AC 1`` or
+    polynomial coefficients.  ``form`` marks the E/F/G/H variant: ``""`` for the
+    linear card, ``"behavioral"`` for ``value=``/``vol=``/``cur=`` and
+    ``"poly(N)"`` for polynomial sources.
+    """
 
     name: str
     family: str
@@ -165,6 +174,56 @@ class Element:
     parameters: tuple[Assignment, ...]
     value: Expr | None
     model: str | None
+    meta: CardMeta
+    controls: tuple[str, ...] = ()
+    form: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Title:
+    """The first line of a top-level deck, which ngspice treats as a title."""
+
+    text: str
+    meta: CardMeta
+
+
+@dataclass(frozen=True, slots=True)
+class Option:
+    """``.option``/``.options``: simulator settings kept as written."""
+
+    keyword: str
+    settings: tuple[tuple[str, str | None], ...]
+    meta: CardMeta
+
+
+@dataclass(frozen=True, slots=True)
+class Func:
+    """``.func name(a, b) {body}``: a user-defined expression function."""
+
+    name: str
+    parameters: tuple[str, ...]
+    body: Expr
+    raw: str
+    meta: CardMeta
+
+
+@dataclass(frozen=True, slots=True)
+class Directive:
+    """An analysis, output or initial-condition card such as ``.tran`` or ``.save``.
+
+    These do not change the circuit's structure, so they are kept verbatim.
+    """
+
+    keyword: str
+    text: str
+    meta: CardMeta
+
+
+@dataclass(frozen=True, slots=True)
+class Control:
+    """An ngspice ``.control`` ... ``.endc`` block, kept as text and never interpreted."""
+
+    lines: tuple[str, ...]
     meta: CardMeta
 
 
@@ -178,6 +237,11 @@ class Opaque:
 Statement: TypeAlias = (
     Blank
     | Comment
+    | Title
+    | Option
+    | Func
+    | Directive
+    | Control
     | Include
     | LibCall
     | LibSectionStart

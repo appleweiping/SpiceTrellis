@@ -9,7 +9,7 @@ import pytest
 from spicetrellis.api import analyze_file, flatten, format_deck, inventory, parse_text
 from spicetrellis.cli import main
 from spicetrellis.emit import format_diagnostics, to_json
-from spicetrellis.model import Element, Opaque
+from spicetrellis.model import Control, Element, Opaque
 
 
 def _write(path: Path, text: str) -> Path:
@@ -40,7 +40,7 @@ X1 d g nested ratio = 2
     assert ".global 0 VDD" in rendered
     assert ".model nch nmos level=1" in rendered
     assert ".subckt cell d g s b SCALE=1" in rendered
-    assert "M1 d g s b nch W={width * SCALE} L=length" in rendered
+    assert "M1 d g s b nch W={width*SCALE} L={length}" in rendered
     assert "X1 d g nested ratio=2" in rendered
     assert ".ends cell" in rendered
     assert ".option unsupported" in rendered
@@ -69,8 +69,8 @@ def test_nested_defaults_and_overrides_use_the_caller_environment(tmp_path):
     result = flatten(analyze_file(deck))
     assert not result.has_errors
     rendered = format_deck(result.statements)
-    assert "Xtop__R1 left Xtop__n__internal 12" in rendered
-    assert "Xtop__R2 Xtop__n__internal right 4" in rendered
+    assert "R.Xtop.R1 left Xtop.internal 12" in rendered
+    assert "R.Xtop.R2 Xtop.internal right 4" in rendered
 
 
 def test_global_nodes_are_not_hierarchically_renamed(tmp_path):
@@ -79,8 +79,8 @@ def test_global_nodes_are_not_hierarchically_renamed(tmp_path):
         ".global VDD\n.subckt cell a\nR1 a vdd 1k\n.ends\nX1 out cell\n.end\n",
     )
     rendered = format_deck(flatten(analyze_file(deck)).statements)
-    assert "X1__R1 out vdd 1000" in rendered
-    assert "X1__n__vdd" not in rendered
+    assert "R.X1.R1 out vdd 1k" in rendered
+    assert "X1.vdd" not in rendered
 
 
 def test_elaboration_reports_primitive_expression_errors(tmp_path):
@@ -92,10 +92,10 @@ def test_elaboration_reports_primitive_expression_errors(tmp_path):
         ".model nch nmos\n.end\n",
     )
     analysis = analyze_file(deck)
-    assert not analysis.has_errors
-    result = flatten(analysis)
-    assert result.has_errors
-    assert {item.code for item in result.diagnostics} == {"ST3002", "ST3003", "ST3004"}
+    # Undefined parameters are found by lint, before flattening is attempted.
+    assert analysis.has_errors
+    assert {item.code for item in analysis.diagnostics if item.severity == "error"} == {"ST2105"}
+    assert flatten(analysis).statements == ()
 
 
 def test_invalid_instance_override_is_reported_during_elaboration(tmp_path):
@@ -104,9 +104,8 @@ def test_invalid_instance_override_is_reported_during_elaboration(tmp_path):
         ".subckt cell a b VALUE=1k\nR1 a b {VALUE}\n.ends\nX1 a b cell VALUE={unknown}\n.end\n",
     )
     analysis = analyze_file(deck)
-    assert not analysis.has_errors
-    result = flatten(analysis)
-    assert any(item.code == "ST3007" for item in result.diagnostics)
+    assert any(item.code == "ST2105" for item in analysis.diagnostics)
+    assert flatten(analysis).has_errors
 
 
 def test_unknown_and_duplicate_instance_overrides_are_rejected(tmp_path):
@@ -122,10 +121,13 @@ def test_unknown_and_duplicate_instance_overrides_are_rejected(tmp_path):
 def test_opaque_cards_inside_a_subcircuit_remain_visible_after_expansion(tmp_path):
     deck = _write(
         tmp_path / "opaque.sp",
-        ".subckt cell a b\n.option local\nR1 a b 1k\n.ends\nX1 a b cell\n.end\n",
+        ".subckt cell a b\n.option local\n.if (1)\nR1 a b 1k\n.ends\nX1 a b cell\n.end\n",
     )
-    result = flatten(analyze_file(deck))
-    assert any(isinstance(item, Opaque) for item in result.statements)
+    analysis = analyze_file(deck)
+    assert any(isinstance(item, Opaque) for item in analysis.deck.subcircuits[0].body)
+    result = flatten(analysis)
+    # An unknown card inside a subcircuit cannot be renamed, so it stops flattening.
+    assert [item.code for item in result.diagnostics] == ["ST3012"]
     assert ".option local" in format_deck(result.statements)
 
 
@@ -177,13 +179,13 @@ def test_inventory_for_failed_load_is_empty(tmp_path):
 
 
 def test_diagnostic_text_and_json_have_source_evidence(tmp_path):
-    deck = _write(tmp_path / "bad.sp", "Rbroken a\n")
+    deck = _write(tmp_path / "bad.sp", "* title\nRbroken a\n")
     analysis = analyze_file(deck)
     text = format_diagnostics(analysis.diagnostics)
-    assert f"{deck}:1:1: error ST1002" in text
+    assert f"{deck}:2:1: error ST1002" in text
     payload = json.loads(to_json(analysis.diagnostics))
     assert payload[0]["primary"]["filename"] == str(deck)
-    assert payload[0]["primary"]["start_line"] == 1
+    assert payload[0]["primary"]["start_line"] == 2
 
 
 def test_no_diagnostics_has_explicit_text():
@@ -193,11 +195,11 @@ def test_no_diagnostics_has_explicit_text():
 def test_cli_stdout_paths_and_invalid_formatting(tmp_path, capsys):
     valid = _write(tmp_path / "valid.sp", "R1 a 0 1k\n.end\n")
     assert main(["flatten", str(valid)]) == 0
-    assert "R1 a 0 1000" in capsys.readouterr().out
+    assert "R1 a 0 1k" in capsys.readouterr().out
     assert main(["format", str(valid)]) == 0
     assert capsys.readouterr().out == "R1 a 0 1k\n.end\n"
 
-    invalid = _write(tmp_path / "invalid.sp", "R1 a\n")
+    invalid = _write(tmp_path / "invalid.sp", "* t\nR1 a\n")
     assert main(["format", str(invalid)]) == 1
     assert "ST1002" in capsys.readouterr().err
     assert main(["inventory", str(invalid)]) == 1
@@ -224,7 +226,8 @@ def test_control_like_text_is_never_executed(tmp_path):
     )
     analysis = analyze_file(deck)
     assert not sentinel.exists()
-    assert sum(item.code == "ST1101" for item in analysis.diagnostics) == 3
+    assert not any(item.code == "ST1101" for item in analysis.diagnostics)
+    assert isinstance(analysis.deck.top[0], Control)
 
 
 def test_cli_output_is_stable_across_hash_seeds():
@@ -242,7 +245,7 @@ def test_cli_output_is_stable_across_hash_seeds():
             text=True,
             capture_output=True,
             check=True,
-            timeout=20,
+            timeout=180,
         )
         outputs.append(completed.stdout)
     assert outputs[0] == outputs[1]

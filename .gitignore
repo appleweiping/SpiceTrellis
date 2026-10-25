@@ -29,3 +29,4 @@ coverage.out
 coverage_cov
 $coverPath
 /interop/go/coverage
+.cache/

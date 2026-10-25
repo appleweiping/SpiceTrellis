@@ -20,9 +20,13 @@ from spicetrellis._output import write_text_atomic
 from spicetrellis.expressions import format_expression, parse_expression
 from spicetrellis.model import (
     Analysis,
+    Control,
+    Directive,
     Element,
+    Func,
     Model,
     Opaque,
+    Option,
     Param,
     SemanticDeck,
     SourceSpan,
@@ -274,12 +278,22 @@ def _one_module(
     subcircuit: Subcircuit | None,
     aliases: Mapping[str, str],
 ) -> tuple[IRModule, list[IRLoss]]:
-    instances = tuple(_instance(name, item, aliases) for item in body if isinstance(item, Element))
-    losses = [
-        IRLoss(name, item.reason, item.text, _source(item.meta.span, aliases))
+    instances = tuple(
+        _instance(name, item, aliases)
         for item in body
-        if isinstance(item, Opaque)
-    ]
+        if isinstance(item, Element) and item.family in _FAMILIES
+    )
+    losses: list[IRLoss] = []
+    for item in body:
+        source = _source(item.meta.span, aliases)
+        if isinstance(item, Opaque):
+            losses.append(IRLoss(name, item.reason, item.text, source))
+        elif isinstance(item, Element) and item.family not in _FAMILIES:
+            reason = f"element family {item.family} is not part of circuit IR version 1"
+            losses.append(IRLoss(name, reason, item.meta.raw, source))
+        elif isinstance(item, (Directive, Option, Control, Func)):
+            reason = "card is not part of circuit IR version 1"
+            losses.append(IRLoss(name, reason, item.meta.raw, source))
     module_source = _source(subcircuit.span, aliases) if subcircuit is not None else None
     return (
         IRModule(

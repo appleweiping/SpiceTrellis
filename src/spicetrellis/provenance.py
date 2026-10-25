@@ -36,11 +36,11 @@ from typing import Any
 
 from spicetrellis.model import ElaboratedDeck, Provenance, SourceSpan
 
-#: Separator between instance names in a generated flat name. Splitting on it
-#: is exact rather than heuristic: the elaborator encodes every segment so that
-#: `__` cannot occur inside one, turning a literal underscore into `_u` and any
-#: other byte into `_xNN`. A path parsed here is the path the elaborator built.
-PATH_SEPARATOR = "__"
+#: Separator between instance names in a flat name. The elaborator uses
+#: ngspice's own convention, ``R.X1.X2.R5``: device letter, instance path, then
+#: the card's own name. The expansion chain says how many path segments there
+#: are, so a dot inside the card's own name does not confuse the split.
+PATH_SEPARATOR = "."
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,12 +60,16 @@ class Origin:
         top-level card has an empty path rather than a path of one.
         """
 
-        parts = self.output_name.split(PATH_SEPARATOR)
-        return tuple(parts[:-1])
+        if not self.expansion_chain:
+            return ()
+        parts = self.output_name.split(PATH_SEPARATOR, self.depth + 1)
+        return tuple(parts[1 : self.depth + 1])
 
     @property
     def local_name(self) -> str:
-        return self.output_name.split(PATH_SEPARATOR)[-1]
+        if not self.expansion_chain:
+            return self.output_name
+        return self.output_name.split(PATH_SEPARATOR, self.depth + 1)[-1]
 
     @property
     def depth(self) -> int:

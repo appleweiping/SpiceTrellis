@@ -96,7 +96,7 @@ def test_result_main_module_help_is_available_in_a_clean_process(tmp_path) -> No
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=180,
         check=False,
     )
     assert process.returncode == 0

@@ -103,5 +103,3 @@ def test_unicode_escape_semantics_match_go_without_surrogate_normalization(
     valid = (FIXTURES / "rich-v1.json").read_text(encoding="utf-8")
     library = load_physical_text(valid.replace("interop-library", wire_name, 1))
     assert library.name == expected
-
-

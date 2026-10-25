@@ -1,0 +1,7 @@
+* One SKY130 nfet, using the raw upstream sky130_fd_pr repository (v0.20.1).
+* Fetch it with: python tools/fetch_sky130.py --source upstream --dest .cache/sky130_fd_pr
+.lib ../../.cache/sky130_fd_pr/models/sky130.lib.spice tt
+XM1 d g 0 0 sky130_fd_pr__nfet_01v8 L=0.15 W=1
+V1 d 0 1.8
+V2 g 0 0.9
+.end

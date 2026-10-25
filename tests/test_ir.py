@@ -578,7 +578,7 @@ def test_ir_cli_reports_semantic_and_document_errors(
 
     flat_deck = tmp_path / "flat-expression.sp"
     flat_output = tmp_path / "flat-expression.ir.json"
-    flat_deck.write_text("R1 a 0 " + "+".join(["1"] * 2_000) + "\n.end\n", encoding="utf-8")
+    flat_deck.write_text("* long\nR1 a 0 " + "+".join(["1"] * 2_000) + "\n.end\n", encoding="utf-8")
     assert main(["export-ir", str(flat_deck), "-o", str(flat_output)]) == 1
     captured = capsys.readouterr()
     assert "1024-token limit" in captured.err

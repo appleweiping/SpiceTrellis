@@ -8,13 +8,17 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from spicetrellis.expressions import format_expression
+from spicetrellis.expressions import spice_expression
 from spicetrellis.model import (
     Assignment,
     Blank,
     Comment,
+    Control,
     Diagnostic,
+    Directive,
+    Element,
     End,
+    Func,
     Global,
     Include,
     LibCall,
@@ -22,16 +26,18 @@ from spicetrellis.model import (
     LibSectionStart,
     Model,
     Opaque,
+    Option,
     Param,
     Statement,
     SubcktEnd,
     SubcktStart,
     SyntaxDeck,
+    Title,
 )
 
 
 def _assignment(assignment: Assignment) -> str:
-    return f"{assignment.name}={format_expression(assignment.expression)}"
+    return f"{assignment.name}={spice_expression(assignment.expression)}"
 
 
 def _commented(rendered: str, statement: Statement) -> str:
@@ -52,7 +58,10 @@ def format_statement(statement: Statement) -> str:
     if isinstance(statement, Blank):
         return ""
     if isinstance(statement, Comment):
-        return "*" if not statement.text else f"* {statement.text}"
+        text = statement.text
+        if not text:
+            return "*"
+        return f"*{text}" if text.startswith("*") else f"* {text}"
     if isinstance(statement, Include):
         return _commented(f".include {_quoted(statement.target)}", statement)
     if isinstance(statement, LibCall):
@@ -83,15 +92,52 @@ def format_statement(statement: Statement) -> str:
         return _commented(".end", statement)
     if isinstance(statement, Opaque):
         return _commented(statement.text, statement)
-    parts = [statement.name, *statement.nodes]
-    if statement.family in {"R", "C", "L"} and statement.value is not None:
-        parts.append(format_expression(statement.value))
-    elif statement.family in {"V", "I"}:
-        parts.append(statement.tail)
-    elif statement.family in {"M", "X"} and statement.model:
-        parts.append(statement.model)
-    parts.extend(_assignment(item) for item in statement.parameters)
-    return _commented(" ".join(part for part in parts if part), statement)
+    if isinstance(statement, Title):
+        return statement.text
+    if isinstance(statement, Directive):
+        return _commented(statement.text, statement)
+    if isinstance(statement, Control):
+        return "\n".join(line.strip() for line in statement.lines)
+    if isinstance(statement, Option):
+        settings = " ".join(
+            key if value is None else f"{key}={value}" for key, value in statement.settings
+        )
+        return _commented(f"{statement.keyword} {settings}".rstrip(), statement)
+    if isinstance(statement, Func):
+        arguments = ", ".join(statement.parameters)
+        rendered = f".func {statement.name}({arguments}) {spice_expression(statement.body)}"
+        return _commented(rendered, statement)
+    return _commented(format_element(statement), statement)
+
+
+def format_element(element: Element) -> str:
+    """Render one device card in the field order its family expects."""
+
+    family = element.family
+    parts: list[str] = [element.name]
+    value = spice_expression(element.value) if element.value is not None else ""
+    if family in {"E", "G"} and element.form.startswith("poly"):
+        parts += [*element.nodes[:2], element.form, *element.nodes[2:], element.tail]
+    elif family in {"F", "H"} and element.form.startswith("poly"):
+        parts += [*element.nodes, element.form, *element.controls, element.tail]
+    elif family in {"F", "H"}:
+        parts += [*element.nodes, *element.controls, value]
+    elif family == "K":
+        parts += [*element.controls, value]
+    elif family == "W":
+        parts += [*element.nodes, *element.controls, element.model or "", element.tail]
+    else:
+        parts += list(element.nodes)
+        if family in {"R", "C", "L"}:
+            parts += [value, element.model or ""]
+        elif family in {"V", "I"}:
+            parts.append(element.tail)
+        elif family in {"E", "G"}:
+            parts.append(value)
+        elif family != "B" and family != "T":
+            parts += [element.model or "", value, element.tail]
+    parts.extend(_assignment(item) for item in element.parameters)
+    return " ".join(part for part in parts if part)
 
 
 def format_deck(deck: SyntaxDeck | tuple[Statement, ...]) -> str:
@@ -99,12 +145,21 @@ def format_deck(deck: SyntaxDeck | tuple[Statement, ...]) -> str:
     return "\n".join(format_statement(statement) for statement in statements).rstrip() + "\n"
 
 
+def _display_path(filename: str) -> str:
+    """Show a path relative to the working directory when it lies inside it."""
+
+    try:
+        return Path(filename).relative_to(Path.cwd()).as_posix()
+    except ValueError:
+        return filename
+
+
 def format_diagnostics(diagnostics: tuple[Diagnostic, ...]) -> str:
     if not diagnostics:
         return "no diagnostics\n"
     return "".join(
-        f"{item.primary.filename}:{item.primary.start_line}:{item.primary.start_col}: "
-        f"{item.severity} {item.code}: {item.message}\n"
+        f"{_display_path(item.primary.filename)}:{item.primary.start_line}:"
+        f"{item.primary.start_col}: {item.severity} {item.code}: {item.message}\n"
         for item in diagnostics
     )
 

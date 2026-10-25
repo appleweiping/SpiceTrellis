@@ -43,7 +43,7 @@ def test_names_are_case_insensitive_and_discoverable():
 
 @pytest.mark.parametrize(
     "source",
-    ["", "{1 + }", "sqrt(2)", "1 && 2", "(1 + 2", "1 / 0", "2 ^ 0.5"],
+    ["", "{1 + }", "nosuch(2)", "1 ? 2", "(1 + 2", "1 / 0", "(-8) ^ 0.5", "sqrt(-1)"],
 )
 def test_invalid_or_unsafe_expressions_are_rejected(source):
     with pytest.raises(ExpressionError):

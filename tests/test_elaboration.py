@@ -14,19 +14,19 @@ def test_hierarchy_is_flattened_with_values_and_provenance():
     assert not result.has_errors
     elements = [item for item in result.statements if isinstance(item, Element)]
     assert all(item.family != "X" for item in elements)
-    assert {item.name for item in elements} == {"VDD", "X1__Rup", "X1__Rdown", "Cload"}
-    assert {item.nodes for item in elements if item.name.startswith("X1__")} == {
+    assert {item.name for item in elements} == {"VDD", "R.X1.Rup", "R.X1.Rdown", "Cload"}
+    assert {item.nodes for item in elements if item.name.startswith("R.X1.")} == {
         ("vin", "vout"),
         ("vout", "0"),
     }
     rendered = format_deck(result.statements)
-    assert "X1__Rup vin vout 10000" in rendered
+    assert "R.X1.Rup vin vout 10000" in rendered
     assert "VDD vdd 0 DC 1.2" in rendered
     assert len(result.provenance) == 4
     assert (
         len(
             next(
-                item for item in result.provenance if item.output_name == "X1__Rup"
+                item for item in result.provenance if item.output_name == "R.X1.Rup"
             ).expansion_chain
         )
         == 1
@@ -37,8 +37,8 @@ def test_nested_example_expands_to_unique_hierarchical_names():
     root = Path(__file__).parents[1] / "examples" / "hierarchical_filter" / "top.sp"
     result = flatten(analyze_file(root))
     names = [statement.name for statement in result.statements if isinstance(statement, Element)]
-    assert "Xfilter__Xfirst__Rseries" in names
-    assert "Xfilter__Xsecond__Cshunt" in names
+    assert "R.Xfilter.Xfirst.Rseries" in names
+    assert "C.Xfilter.Xsecond.Cshunt" in names
     assert len(names) == len(set(name.casefold() for name in names))
 
 
@@ -70,7 +70,7 @@ def test_hierarchical_name_encoding_is_injective_for_delimiter_like_names(tmp_pa
     result = flatten(analyze_file(path))
     assert not result.has_errors
     names = [item.name for item in result.statements if isinstance(item, Element)]
-    assert names == ["Xa__Xb__Rpart", "Xa_u_uXb__Rpart"]
+    assert names == ["R.Xa.Xb.Rpart", "R.Xa__Xb.Rpart"]
     assert len(names) == len(set(name.casefold() for name in names))
 
 
@@ -90,7 +90,7 @@ def test_forward_local_parameters_are_resolved_for_earlier_elements(tmp_path):
     assert not analysis.has_errors
     result = flatten(analysis)
     assert not result.has_errors
-    assert "X1__R1 a 0 2000" in format_deck(result.statements)
+    assert "R.X1.R1 a 0 2000" in format_deck(result.statements)
 
 
 def test_long_reverse_parameter_chain_uses_dependency_scheduling(tmp_path):

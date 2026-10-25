@@ -7,7 +7,14 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import TypeAlias
 
-from spicetrellis.expressions import expression_names
+from spicetrellis.expressions import (
+    BUILTIN_FUNCTIONS,
+    RUNTIME_FUNCTIONS,
+    RUNTIME_NAMES,
+    Expr,
+    expression_calls,
+    expression_names,
+)
 from spicetrellis.model import (
     Analysis,
     Assignment,
@@ -17,6 +24,7 @@ from spicetrellis.model import (
     Diagnostic,
     Element,
     End,
+    Func,
     Global,
     Include,
     LibCall,
@@ -33,18 +41,20 @@ from spicetrellis.model import (
     SyntaxDeck,
     sorted_diagnostics,
 )
-from spicetrellis.parser import parse_text
+from spicetrellis.parser import CardParseError, model_parameters, parse_text, tail_expressions
 
 
 @dataclass(frozen=True, slots=True)
 class AnalysisLimits:
     """Resource limits applied while loading and expanding a SPICE project."""
 
-    max_file_bytes: int = 2 * 1024 * 1024
-    max_total_bytes: int = 10 * 1024 * 1024
-    max_files: int = 256
+    # Big enough for a full PDK corner: the SKY130 "tt" section reaches about
+    # 150 files and 23 MB, the largest single file a little over 4 MB.
+    max_file_bytes: int = 32 * 1024 * 1024
+    max_total_bytes: int = 256 * 1024 * 1024
+    max_files: int = 4096
     max_include_depth: int = 64
-    max_expanded_statements: int = 250_000
+    max_expanded_statements: int = 2_000_000
 
     def __post_init__(self) -> None:
         for field in fields(self):
@@ -145,7 +155,7 @@ class _ProjectLoader:
             )
             return None
         try:
-            deck = parse_text(text, str(path))
+            deck = parse_text(text, str(path), title_line=path == self.entry)
         except RecursionError:
             self.diagnostics.append(
                 Diagnostic(
@@ -427,38 +437,71 @@ def _strong_components(graph: dict[str, set[str]]) -> list[tuple[str, ...]]:
     return result
 
 
+def _check_expression(
+    expression: Expr,
+    known: set[str] | frozenset[str],
+    functions: set[str] | frozenset[str],
+    what: str,
+    span: SourceSpan,
+    diagnostics: list[Diagnostic],
+) -> None:
+    """Report undefined parameters and unknown functions in one expression."""
+
+    for missing in sorted(expression_names(expression) - known - RUNTIME_NAMES):
+        diagnostics.append(
+            Diagnostic(
+                "ST2105", "error", f"{what} references undefined parameter {missing!r}", span
+            )
+        )
+    for unknown in sorted(expression_calls(expression) - functions):
+        diagnostics.append(
+            Diagnostic("ST2104", "error", f"{what} calls unknown function {unknown!r}", span)
+        )
+
+
 def _validate_parameters(
     assignments: list[Assignment],
     spans: list[SourceSpan],
     external: set[str],
     diagnostics: list[Diagnostic],
+    functions: set[str] | frozenset[str] = BUILTIN_FUNCTIONS | RUNTIME_FUNCTIONS,
 ) -> None:
     definitions: dict[str, tuple[Assignment, SourceSpan]] = {}
     for assignment, span in zip(assignments, spans, strict=True):
         key = assignment.name.casefold()
         if key in definitions:
+            # ngspice keeps the last definition without comment; say so.
             diagnostics.append(
                 Diagnostic(
                     "ST2101",
-                    "error",
-                    f"duplicate parameter {assignment.name!r}",
+                    "warning",
+                    f"parameter {assignment.name!r} is defined again; ngspice uses this "
+                    "later definition",
                     span,
                     (definitions[key][1],),
                 )
             )
-        else:
-            definitions[key] = (assignment, span)
+        definitions[key] = (assignment, span)
     local = set(definitions)
     graph: dict[str, set[str]] = {}
     for name, (assignment, span) in definitions.items():
         references = set(expression_names(assignment.expression))
         graph[name] = references & local
-        for missing in sorted(references - local - external):
+        for missing in sorted(references - local - external - RUNTIME_NAMES):
             diagnostics.append(
                 Diagnostic(
                     "ST2102",
                     "error",
                     f"parameter {assignment.name!r} references undefined parameter {missing!r}",
+                    span,
+                )
+            )
+        for unknown in sorted(expression_calls(assignment.expression) - functions):
+            diagnostics.append(
+                Diagnostic(
+                    "ST2104",
+                    "error",
+                    f"parameter {assignment.name!r} calls unknown function {unknown!r}",
                     span,
                 )
             )
@@ -474,6 +517,228 @@ def _validate_parameters(
                     tuple(definitions[name][1] for name in component[1:]),
                 )
             )
+
+
+def model_names(statements: tuple[Statement, ...] | list[Statement]) -> set[str]:
+    """Case-folded model names a scope defines, including binned ``name.N`` bases."""
+
+    names: set[str] = set()
+    for statement in statements:
+        if isinstance(statement, Model):
+            key = statement.name.casefold()
+            names.add(key)
+            base, dot, suffix = key.rpartition(".")
+            if dot and suffix.isdigit():
+                names.add(base)
+    return names
+
+
+def _scope_checks(
+    scope_name: str,
+    statements: tuple[Statement, ...],
+    known: set[str],
+    functions: set[str],
+    models: set[str],
+    subckt_map: dict[str, Subcircuit],
+    diagnostics: list[Diagnostic],
+) -> None:
+    """Check the cards of one scope: names, references, models and expressions."""
+
+    seen_elements: dict[str, Element] = {}
+    families: dict[str, str] = {}
+    for statement in statements:
+        if isinstance(statement, Element):
+            families[statement.name.casefold()] = statement.family
+    for statement in statements:
+        if isinstance(statement, Model):
+            try:
+                parameters = model_parameters(statement.tail)
+            except CardParseError:
+                continue
+            for assignment in parameters:
+                _check_expression(
+                    assignment.expression,
+                    known,
+                    functions,
+                    f"model {statement.name!r} parameter {assignment.name!r}",
+                    statement.meta.span,
+                    diagnostics,
+                )
+            continue
+        if not isinstance(statement, Element):
+            continue
+        span = statement.meta.span
+        key = statement.name.casefold()
+        if key in seen_elements:
+            diagnostics.append(
+                Diagnostic(
+                    "ST2206",
+                    "error",
+                    f"duplicate element {statement.name!r} in scope {scope_name}",
+                    span,
+                    (seen_elements[key].meta.span,),
+                )
+            )
+        else:
+            seen_elements[key] = statement
+        _element_references(statement, families, models, known, diagnostics)
+        if statement.family == "X":
+            _instance_checks(statement, subckt_map, known, functions, diagnostics)
+            continue
+        if statement.value is not None:
+            _check_expression(
+                statement.value, known, functions, f"{statement.name!r}", span, diagnostics
+            )
+        for assignment in statement.parameters:
+            _check_expression(
+                assignment.expression,
+                known,
+                functions,
+                f"{statement.name!r} parameter {assignment.name!r}",
+                span,
+                diagnostics,
+            )
+        try:
+            embedded = tail_expressions(statement.tail)
+        except CardParseError as error:
+            diagnostics.append(Diagnostic("ST2105", "error", str(error), span))
+            embedded = []
+        for _match, expression in embedded:
+            _check_expression(
+                expression, known, functions, f"{statement.name!r}", span, diagnostics
+            )
+
+
+def _element_references(
+    element: Element,
+    families: dict[str, str],
+    models: set[str],
+    known: set[str],
+    diagnostics: list[Diagnostic],
+) -> None:
+    span = element.meta.span
+    if element.model and element.family != "X":
+        key = element.model.casefold()
+        if key not in models:
+            if element.family in {"R", "C", "L"} and key in known and element.value is None:
+                hint = "{" + element.model + "}"
+                diagnostics.append(
+                    Diagnostic(
+                        "ST2216",
+                        "warning",
+                        f"{element.name!r} names {element.model!r}, which is a parameter, not a "
+                        f"model; ngspice falls back to the parameter, but {hint} says what is "
+                        "meant",
+                        span,
+                    )
+                )
+            else:
+                diagnostics.append(
+                    Diagnostic(
+                        "ST2215",
+                        "error",
+                        f"{element.name!r} uses model {element.model!r}, which is not defined "
+                        "in this scope",
+                        span,
+                    )
+                )
+    expected = {"F": "V", "H": "V", "W": "V", "K": "L"}.get(element.family)
+    for control in element.controls:
+        found = families.get(control.casefold())
+        if found is None:
+            diagnostics.append(
+                Diagnostic(
+                    "ST2217",
+                    "error",
+                    f"{element.name!r} refers to {control!r}, which is not in the same scope",
+                    span,
+                )
+            )
+        elif expected and found != expected:
+            noun = "an inductor" if expected == "L" else "a voltage source"
+            diagnostics.append(
+                Diagnostic(
+                    "ST2217", "error", f"{element.name!r} needs {control!r} to be {noun}", span
+                )
+            )
+
+
+def _instance_checks(
+    statement: Element,
+    subckt_map: dict[str, Subcircuit],
+    known: set[str],
+    functions: set[str],
+    diagnostics: list[Diagnostic],
+) -> None:
+    span = statement.meta.span
+    target = subckt_map.get((statement.model or "").casefold())
+    if target is None:
+        diagnostics.append(
+            Diagnostic("ST2207", "error", f"unknown subcircuit {statement.model!r}", span)
+        )
+        return
+    if len(statement.nodes) != len(target.pins):
+        diagnostics.append(
+            Diagnostic(
+                "ST2208",
+                "error",
+                f"instance {statement.name!r} supplies {len(statement.nodes)} nodes "
+                f"but {target.name!r} requires {len(target.pins)}",
+                span,
+                (target.span,),
+            )
+        )
+        return
+    allowed = subcircuit_parameter_names(target) | {"m"}
+    siblings = {item.name.casefold() for item in statement.parameters}
+    seen_overrides: set[str] = set()
+    for override in statement.parameters:
+        override_key = override.name.casefold()
+        if override_key not in allowed:
+            # ngspice accepts this silently and nothing inside reads the value.
+            diagnostics.append(
+                Diagnostic(
+                    "ST2210",
+                    "warning",
+                    f"instance {statement.name!r} sets {override.name!r}, which "
+                    f"{target.name!r} never reads",
+                    span,
+                    (target.span,),
+                )
+            )
+        if override_key in seen_overrides:
+            diagnostics.append(
+                Diagnostic(
+                    "ST2211",
+                    "error",
+                    f"instance {statement.name!r} repeats override {override.name!r}",
+                    span,
+                )
+            )
+        seen_overrides.add(override_key)
+        # xschem writes ad='... W/nf ...': an override may read its siblings.
+        _check_expression(
+            override.expression,
+            known | (siblings - {override_key}),
+            functions,
+            f"instance {statement.name!r} override {override.name!r}",
+            span,
+            diagnostics,
+        )
+
+
+def subcircuit_parameter_names(subckt: Subcircuit) -> set[str]:
+    """Parameters an instance can set: header defaults plus ``.param`` cards in the body."""
+
+    names = {item.name.casefold() for item in subckt.defaults}
+    for statement in subckt.body:
+        if isinstance(statement, Param):
+            names.update(item.name.casefold() for item in statement.assignments)
+    return names
+
+
+def _functions(statements: tuple[Statement, ...] | list[Statement]) -> set[str]:
+    return {item.name.casefold() for item in statements if isinstance(item, Func)}
 
 
 def _build_semantic(
@@ -623,78 +888,32 @@ def _build_semantic(
             global_spans.extend([statement.meta.span] * len(statement.assignments))
         elif isinstance(statement, Global):
             global_nodes.extend(statement.nodes)
-    _validate_parameters(global_assignments, global_spans, set(), diagnostics)
+    global_functions = set(BUILTIN_FUNCTIONS | RUNTIME_FUNCTIONS) | _functions(top)
+    _validate_parameters(
+        global_assignments, global_spans, set(), diagnostics, frozenset(global_functions)
+    )
     global_names = {assignment.name.casefold() for assignment in global_assignments}
+    global_models = model_names(top)
 
-    scopes: list[tuple[str, tuple[Statement, ...]]] = [("<top>", tuple(top))]
-    scopes.extend((subckt.name, subckt.body) for subckt in unique_subcircuits)
-    for scope_name, statements in scopes:
-        seen_elements: dict[str, Element] = {}
-        for statement in statements:
-            if not isinstance(statement, Element):
-                continue
-            key = statement.name.casefold()
-            if key in seen_elements:
-                diagnostics.append(
-                    Diagnostic(
-                        "ST2206",
-                        "error",
-                        f"duplicate element {statement.name!r} in scope {scope_name}",
-                        statement.meta.span,
-                        (seen_elements[key].meta.span,),
-                    )
-                )
-            else:
-                seen_elements[key] = statement
-            if statement.family == "X":
-                target = subckt_map.get((statement.model or "").casefold())
-                if target is None:
-                    diagnostics.append(
-                        Diagnostic(
-                            "ST2207",
-                            "error",
-                            f"unknown subcircuit {statement.model!r}",
-                            statement.meta.span,
-                        )
-                    )
-                elif len(statement.nodes) != len(target.pins):
-                    diagnostics.append(
-                        Diagnostic(
-                            "ST2208",
-                            "error",
-                            f"instance {statement.name!r} supplies {len(statement.nodes)} nodes "
-                            f"but {target.name!r} requires {len(target.pins)}",
-                            statement.meta.span,
-                            (target.span,),
-                        )
-                    )
-                else:
-                    allowed = {item.name.casefold() for item in target.defaults}
-                    seen_overrides: dict[str, Assignment] = {}
-                    for override in statement.parameters:
-                        override_key = override.name.casefold()
-                        if override_key not in allowed:
-                            diagnostics.append(
-                                Diagnostic(
-                                    "ST2210",
-                                    "error",
-                                    f"instance {statement.name!r} overrides unknown parameter "
-                                    f"{override.name!r}",
-                                    statement.meta.span,
-                                    (target.span,),
-                                )
-                            )
-                        if override_key in seen_overrides:
-                            diagnostics.append(
-                                Diagnostic(
-                                    "ST2211",
-                                    "error",
-                                    f"instance {statement.name!r} repeats override "
-                                    f"{override.name!r}",
-                                    statement.meta.span,
-                                )
-                            )
-                        seen_overrides[override_key] = override
+    _scope_checks(
+        "<top>",
+        tuple(top),
+        global_names,
+        global_functions,
+        global_models,
+        subckt_map,
+        diagnostics,
+    )
+    for subckt in unique_subcircuits:
+        _scope_checks(
+            subckt.name,
+            subckt.body,
+            global_names | subcircuit_parameter_names(subckt),
+            global_functions | _functions(subckt.body),
+            global_models | model_names(subckt.body),
+            subckt_map,
+            diagnostics,
+        )
 
     call_graph: dict[str, set[str]] = {key: set() for key in subckt_map}
     call_spans: dict[tuple[str, str], SourceSpan] = {}
@@ -727,7 +946,13 @@ def _build_semantic(
             if isinstance(statement, Param):
                 local_assignments.extend(statement.assignments)
                 local_spans.extend([statement.meta.span] * len(statement.assignments))
-        _validate_parameters(local_assignments, local_spans, global_names, diagnostics)
+        _validate_parameters(
+            local_assignments,
+            local_spans,
+            global_names,
+            diagnostics,
+            frozenset(global_functions | _functions(subckt.body)),
+        )
 
     return SemanticDeck(
         entry,

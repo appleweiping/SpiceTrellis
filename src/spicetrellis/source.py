@@ -25,6 +25,8 @@ def _line_span(filename: str, line_number: int, text: str) -> SourceSpan:
 def split_inline_comment(text: str) -> tuple[str, str | None, str | None]:
     """Split portable `$` or `;` comments outside quotes and expressions."""
 
+    if "$" not in text and ";" not in text:
+        return text.rstrip(), None, None
     quote: str | None = None
     brace_depth = 0
     paren_depth = 0
@@ -58,45 +60,55 @@ def split_inline_comment(text: str) -> tuple[str, str | None, str | None]:
 def logical_cards(
     text: str, filename: str = "<memory>"
 ) -> tuple[list[LogicalCard], list[Diagnostic]]:
-    """Combine leading-`+` physical continuations while retaining all spans."""
+    """Combine leading-`+` physical continuations while retaining all spans.
+
+    As in ngspice, comment and blank lines may sit between a card and its
+    continuations; SPICE model files do this constantly.  Such lines are kept
+    as their own cards and placed after the card they interrupted.
+    """
 
     cards: list[LogicalCard] = []
     diagnostics: list[Diagnostic] = []
     pending_code: str | None = None
+    pending_parts: list[str] = []
     pending_original: list[str] = []
     pending_segments: list[SourceSpan] = []
+    interrupted: list[LogicalCard] = []
 
     def flush() -> None:
-        nonlocal pending_code, pending_original, pending_segments
-        if pending_code is None:
-            return
-        code, comment, marker = split_inline_comment(pending_code)
-        first, last = pending_segments[0], pending_segments[-1]
-        cards.append(
-            LogicalCard(
-                code=code,
-                original="\n".join(pending_original),
-                span=SourceSpan(
-                    filename,
-                    first.start_line,
-                    first.start_col,
-                    last.end_line,
-                    last.end_col,
-                ),
-                segments=tuple(pending_segments),
-                inline_comment=comment,
-                comment_marker=marker,
+        nonlocal pending_code, pending_parts, pending_original, pending_segments, interrupted
+        if pending_code is not None:
+            code, comment, marker = split_inline_comment(" ".join(pending_parts))
+            first, last = pending_segments[0], pending_segments[-1]
+            cards.append(
+                LogicalCard(
+                    code=code,
+                    original="\n".join(pending_original),
+                    span=SourceSpan(
+                        filename,
+                        first.start_line,
+                        first.start_col,
+                        last.end_line,
+                        last.end_col,
+                    ),
+                    segments=tuple(pending_segments),
+                    inline_comment=comment,
+                    comment_marker=marker,
+                )
             )
-        )
+        cards.extend(interrupted)
         pending_code = None
+        pending_parts = []
         pending_original = []
         pending_segments = []
+        interrupted = []
 
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
         stripped = raw_line.lstrip()
         span = _line_span(filename, line_number, raw_line)
         if stripped.startswith("+"):
             if pending_code is None:
+                flush()
                 diagnostics.append(
                     Diagnostic(
                         "ST1001",
@@ -111,20 +123,30 @@ def logical_cards(
                     )
                 )
                 continue
-            pending_code += " " + stripped[1:].strip()
+            # The previous line's own trailing comment must not swallow this one.
+            pending_parts[-1] = split_inline_comment(pending_parts[-1])[0]
+            segment = stripped[1:].strip()
+            if segment:
+                pending_parts.append(segment)
             pending_original.append(raw_line)
             pending_segments.append(span)
             continue
 
-        flush()
         if not stripped:
-            cards.append(LogicalCard("", raw_line, span, (span,), kind="blank"))
+            card = LogicalCard("", raw_line, span, (span,), kind="blank")
         elif stripped.startswith("*"):
-            cards.append(LogicalCard(stripped[1:].strip(), raw_line, span, (span,), kind="comment"))
+            card = LogicalCard(stripped[1:].strip(), raw_line, span, (span,), kind="comment")
         else:
+            flush()
             pending_code = raw_line.strip()
+            pending_parts = [pending_code]
             pending_original = [raw_line]
             pending_segments = [span]
+            continue
+        if pending_code is None:
+            cards.append(card)
+        else:
+            interrupted.append(card)
 
     flush()
     return cards, diagnostics
